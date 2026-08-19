@@ -34,15 +34,22 @@ static void regprop(HDEVINFO di, SP_DEVINFO_DATA *dd, DWORD id, const char *rot)
         printf("   %-28s <erro %lu>\n", rot, GetLastError());
 }
 
-int main(void)
+/* Filtro do instance ID. Passe um trecho como argumento -- tipicamente o numero
+ * de serie USB do seu device, que aparece em `/dev/serial/by-id/` no Linux e no
+ * fim do instance ID no Wine. Sem argumento, lista todos os nos USB presentes. */
+int main(int argc, char **argv)
 {
+    const char *filtro = (argc > 1) ? argv[1] : NULL;
+
     HDEVINFO di = SetupDiGetClassDevsA(NULL, "USB", NULL,
                                        DIGCF_ALLCLASSES | DIGCF_PRESENT);
     SP_DEVINFO_DATA dd = {.cbSize = sizeof(dd)};
     for (DWORD i = 0; SetupDiEnumDeviceInfo(di, i, &dd); i++) {
         char inst[512] = {0};
         SetupDiGetDeviceInstanceIdA(di, &dd, inst, sizeof(inst), NULL);
-        if (!strstr(inst, "346534443132") || strstr(inst, "MI_"))
+        if (strstr(inst, "MI_"))
+            continue;
+        if (filtro && !strstr(inst, filtro))
             continue;
         printf("%s\n", inst);
         regprop(di, &dd, SPDRP_DEVICEDESC,   "SPDRP_DEVICEDESC");

@@ -1,0 +1,57 @@
+# VoCore -- acesso USB para o SimHub falar com a tela por libusb
+#
+#   c872:1004  VoCore screen (aqui: "M-PRO Screen", a tela da PDU5)
+#
+# Instalar:
+#   sudo cp udev/70-vocore.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+#
+# ⚠️ Prefixo 70- obrigatorio -- mesma razao do 70-conspit.rules: quem efetiva
+# a tag e' o 73-seat-late.rules, e uma regra 99- chega tarde demais.
+#
+#
+# NAO E' "INSTALAR DRIVER"
+#
+# No Windows o SimHub instala um driver para a tela VoCore. Medido em
+# 2026-08-16, o caminho dele e':
+#
+#   SimHub.BitmapDisplay.Vocore.dll -> SimHub.LibUsbNative.dll -> libusb-1.0.dll
+#
+# Ou seja: nao ha' driver de display: e' libusb puro, e a tela e' escrita como
+# device USB bruto. O que o instalador do Windows faz e' LIGAR O WinUSB ao
+# device (o mesmo que o Zadig faz), porque no Windows libusb nao fala com um
+# device sem um driver WinUSB/libusbK ligado a ele.
+#
+# Sob Wine esse passo nao existe e nao deve ser reproduzido: instalaria um
+# driver de kernel do Windows, que o Wine nao executa. ⚠️ E a `winusb.dll`
+# builtin do Wine e' STUB (medido em 2026-08-16: "(%p) - stub" nas strings) --
+# uma versao anterior deste comentario afirmava que ela repassava para a
+# libusb do host, o que e' falso. O caminho SimHub->tela NAO funciona sob o
+# Wine atual; ver a secao VoCore do CLAUDE.md para o estado real.
+#
+#
+# O QUE REALMENTE FALTA: ESCRITA NO NO' USB
+#
+# Medido em 2026-08-16, com a tela ligada:
+#
+#   /dev/bus/usb/005/023   crw-rw-r--  root root
+#
+# O usuario da sessao tem so' LEITURA. libusb precisa de LEITURA E ESCRITA para
+# reivindicar a interface (libusb_claim_interface); com r-- ela falha ao abrir.
+# E' o mesmo bloqueio do /dev/hidraw* resolvido no 70-pokornyi.rules, so' que
+# em outro tipo de no'.
+#
+# ⚠️ c872 e' TAMBEM o VID da Cube Controls (F-PRO 2007, GT-PRO V2 200A,
+# AC190 200B, AMG 200C, Astra 2010). Por isso esta regra casa o PID 1004
+# EXATO, e nao o vendor inteiro -- um volante Cube Controls e' um device HID
+# e nao tem nada a ver com esta regra.
+#
+# ⚠️ Isto libera o ACESSO, que e' condicao necessaria mas talvez nao
+# suficiente. O CLAUDE.md documenta um segundo bloqueio, independente deste:
+# volantes com tela pedem `HasParentHub=True` e o SimHub sobe a arvore USB
+# para saber a QUAL volante a tela pertence -- arvore que o Wine nao expoe
+# (PortSignature/UsbPath lancam NullReferenceException em 100% dos devices).
+# A entrada "Generic Vocore Screen" do catalogo talvez nao dependa desse
+# casamento; e' justamente o que esta regra permite testar.
+
+SUBSYSTEM=="usb", ATTR{idVendor}=="c872", ATTR{idProduct}=="1004", TAG+="uaccess"
