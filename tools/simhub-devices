@@ -1,0 +1,518 @@
+#!/usr/bin/env python3
+"""simhub-devices — instala e diagnostica o suporte a perifericos do SimHub no Linux.
+
+    simhub-devices doctor                  diagnostico (padrao; so' leitura)
+    simhub-devices install udev            ACL de /dev/hidraw* e do no USB da tela
+    simhub-devices install registry        winebus: EnableHidraw / Enable SDL / DisableInput
+    simhub-devices install bridge          DLL da ponte libusb + unit systemd do helper
+    simhub-devices install pdu5-leds       patch do usagePage + remocao do cache NGen
+    simhub-devices install serial [...]    receita 2: no PnP + COM para device serial
+    simhub-devices post-update             refaz o que um update do SimHub desfaz
+    simhub-devices clean-cache             NGen + entradas PnP obsoletas
+
+⚠️ TUDO E' DRY-RUN por padrao. Passe --apply para agir.
+
+Por que os subcomandos sao ACOES e nao modelos de volante: nao ha nada por modelo
+para selecionar. UMA regra udev (`0483:cb??`) cobre TODOS os Pokornyi, as chaves de
+registro sao globais ao prefixo, e a tela e' agnostica de modelo (toda VoCore e'
+c872:1004). O unico passo realmente por unidade e' o serial (receita 2), que precisa
+do caminho em /dev/serial/by-id/ e de um numero de COM.
+
+⚠️ Licao de 2026-08-18/19, que este script existe para nao repetir: distinga
+   "o device falhou" de "o device nem foi tentado". A PDU5 passou um dia parecendo
+   "LEDs quebrados" quando o SimHub nunca chegou a escanea-la — e a causa final era
+   o cache NGen engolindo o patch de IL, coisa que nenhum log denuncia.
+"""
+import glob
+import os
+import re
+import subprocess
+import sys
+
+PFX = os.path.expanduser("~/apps/linux-simracing-utils/pfx")
+SH_DIR = os.path.join(PFX, "drive_c/Program Files (x86)/SimHub")
+
+OK, AVISO, ERRO, INFO = "\033[32m✅\033[0m", "\033[33m⚠️\033[0m", "\033[31m❌\033[0m", "  "
+
+# VID/PID -> (nome, receita, observacao)   [medido no catalogo do SimHub, 2026-08-18]
+CATALOGO = {
+    ("0483", "cb01"): ("Pokornyi PDU5",           "hid", "precisa de pdu5-leds-patch.py + remocao do cache NGen"),
+    ("0483", "cb02"): ("Pokornyi PDU7",           "hid", "provavelmente igual a PDU5 (nao testado)"),
+    ("0483", "cb03"): ("Pokornyi LED Brows",      "hid", "idem PDU5"),
+    ("0483", "cb10"): ("Pokornyi HYP-R",          "hid", ""),
+    ("0483", "cb11"): ("Pokornyi GTB Pro",        "hid", ""),
+    ("0483", "cb12"): ("Pokornyi RALLY",          "hid", ""),
+    ("0483", "cb13"): ("Pokornyi LMPH",           "hid", ""),
+    ("0483", "cb14"): ("Pokornyi F499",           "hid", ""),
+    ("0483", "cb15"): ("Pokornyi FGT",            "hid", ""),
+    ("0483", "cb16"): ("Pokornyi HYP-R Pro",      "hid", ""),
+    ("0483", "cb17"): ("Pokornyi LMP PRO V2",     "hid", ""),
+    ("0483", "cb18"): ("Pokornyi GTE PRO V3",     "hid", ""),
+    ("0483", "cb40"): ("Pokornyi MCP ButtonBox",  "hid", ""),
+    ("0483", "cb41"): ("Pokornyi MCP EncoderBox", "hid", ""),
+    ("0483", "cb42"): ("Pokornyi MCP IgnitionBox","hid", ""),
+    ("c872", "1004"): ("Tela VoCore",             "usb", "precisa da ponte wine-libusb-bridge"),
+    ("c872", "200c"): ("Cube Controls AMG",       "hid", ""),
+    # Conspit: TODOS usam StandardProtocolManager = serial (medido no catalogo, 2026-08-19)
+    ("3514", "0007"): ("Conspit H.AO HUB",        "serial", "receita 2: no PnP + DEVPKEY_NAME"),
+    ("3514", "000e"): ("Conspit 300GT",           "serial", "receita 2"),
+    ("3514", "000f"): ("Conspit MAX 01",          "serial", "receita 2 + tela VoCore"),
+    ("3514", "0010"): ("Conspit 310 APEX",        "serial", "receita 2"),
+    ("3514", "0201"): ("Conspit 290 GP",          "serial", "receita 2"),
+    ("3514", "0202"): ("Conspit PW1",             "serial", "receita 2 (LEDs only, sem botoes)"),
+    # ⚠️ o catalogo do SimHub lista o CSD como 0601:3514 — parece VID/PID trocados
+    ("3514", "0601"): ("Conspit CSD",             "serial", "receita 2 + tela; VID/PID suspeito no catalogo"),
+}
+# validados com hardware; o resto e' "a regra cobre, mas ninguem testou"
+TESTADOS = {("0483","cb01"), ("0483","cb10"), ("0483","cb40"), ("0483","cb41"),
+            ("0483","cb42"), ("c872","1004")}
+
+
+def usb_presentes():
+    achados = []
+    for d in sorted(glob.glob("/sys/bus/usb/devices/*")):
+        try:
+            vid = open(os.path.join(d, "idVendor")).read().strip()
+            pid = open(os.path.join(d, "idProduct")).read().strip()
+        except OSError:
+            continue
+        achados.append((vid, pid, os.path.basename(d)))
+    return achados
+
+
+def hidraw_de(vid, pid):
+    """No hidraw do device + se o usuario tem acesso de leitura/escrita."""
+    for h in glob.glob("/sys/class/hidraw/hidraw*"):
+        uevent = os.path.join(h, "device/uevent")
+        try:
+            txt = open(uevent).read()
+        except OSError:
+            continue
+        m = re.search(r"HID_ID=\w+:0000([0-9A-Fa-f]{4}):0000([0-9A-Fa-f]{4})", txt)
+        if m and m.group(1).lower() == vid and m.group(2).lower() == pid:
+            no = "/dev/" + os.path.basename(h)
+            return no, os.access(no, os.R_OK | os.W_OK)
+    return None, False
+
+
+def no_usb_acessivel(porta):
+    try:
+        busnum = open(f"/sys/bus/usb/devices/{porta}/busnum").read().strip()
+        devnum = open(f"/sys/bus/usb/devices/{porta}/devnum").read().strip()
+    except OSError:
+        return None, False
+    no = f"/dev/bus/usb/{int(busnum):03d}/{int(devnum):03d}"
+    return no, os.access(no, os.R_OK | os.W_OK)
+
+
+def ngen_ativo():
+    """True se ha imagem nativa de SimHub.Plugins — ela IGNORA patches de IL.
+
+    O SimHub roda 32-bit e executa a imagem pre-compilada; qualquer patch em
+    SimHub.Plugins.dll vira no-op ate essa pasta ser removida. Sondas x64 JIT-am
+    o IL do disco e enganam quem estiver medindo.
+    """
+    ni = os.path.join(PFX, "drive_c/windows/assembly/NativeImages_v4.0.30319_32")
+    if not os.path.isdir(ni):
+        return False
+    return [d for d in os.listdir(ni) if d.startswith("SimHub.Plug")]
+
+
+def helper_da_ponte_no_ar():
+    try:
+        out = subprocess.run(["ss", "-ltn"], capture_output=True, text=True).stdout
+        return ":47100" in out
+    except FileNotFoundError:
+        return False
+
+
+def doctor():
+    print("\n== devices da bancada ==\n")
+    vistos = 0
+    for vid, pid, porta in usb_presentes():
+        chave = (vid, pid)
+        if chave not in CATALOGO:
+            continue
+        vistos += 1
+        nome, receita, obs = CATALOGO[chave]
+        print(f"  {vid}:{pid}  {nome}")
+        print(f"       porta USB {porta}")
+
+        if receita == "hid":
+            no, pode = hidraw_de(vid, pid)
+            if no is None:
+                print(f"    {ERRO} sem no hidraw — o kernel nao expos o device como HID")
+            elif pode:
+                print(f"    {OK} {no} acessivel (regra udev ativa)")
+            else:
+                print(f"    {ERRO} {no} sem permissao — falta a regra udev (TAG+=\"uaccess\")")
+        elif receita == "usb":
+            no, pode = no_usb_acessivel(porta)
+            print(f"    {OK if pode else ERRO} {no} {'acessivel' if pode else 'sem permissao (falta udev)'}")
+            print(f"    {OK if helper_da_ponte_no_ar() else ERRO} helper da ponte "
+                  f"{'no ar' if helper_da_ponte_no_ar() else 'FORA — a tela nao vai conectar'}")
+        elif receita == "serial":
+            print(f"    {INFO} receita serial: confira o no PnP e o DEVPKEY_NAME no prefixo")
+
+        if chave not in TESTADOS:
+            print(f"    {AVISO} nao validado com hardware neste projeto")
+        if obs:
+            print(f"    {INFO} {obs}")
+        print()
+
+    if not vistos:
+        print("  nenhum device conhecido plugado.\n")
+
+    print("== prefixo do SimHub ==\n")
+    print(f"  {OK if os.path.isdir(SH_DIR) else ERRO} SimHub em {SH_DIR}")
+
+    # ⚠️ imagem nativa engole patch de IL: o app roda 32-bit e ignora a DLL
+    ng = ngen_ativo()
+    if ng:
+        print(f"  {AVISO} cache NGen ATIVO ({len(ng)} imagem(ns) de SimHub.Plug*)")
+        print(f"  {AVISO} qualquer patch em SimHub.Plugins.dll e' IGNORADO pelo app.")
+        print(f"  {AVISO} remova: NativeImages_v4.0.30319_32/SimHub.Plug*")
+    else:
+        print(f"  {OK} sem cache NGen de SimHub.Plugins (patches de IL valem)")
+    # ⚠️ a distincao que da' nome ao script: enabled != tentado != funcionando
+    print(f"\n  {INFO} lembrete: 'Searching device...' na UI significa que o SimHub esta")
+    print(f"  {INFO} TENTANDO. Se o device nem aparece no log em DEBUG, ele nem foi")
+    print(f"  {INFO} escaneado — problema diferente, a montante do driver.\n")
+
+
+
+# ---------------------------------------------------------------- infraestrutura
+
+APLICAR = False          # ⚠️ dry-run por padrao; --apply liga
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PONTE = os.path.expanduser("~/apps/wine-libusb-bridge")
+NGEN = os.path.join(PFX, "drive_c/windows/assembly/NativeImages_v4.0.30319_32")
+
+
+def passo(texto):
+    print(f"  {'[aplicando]' if APLICAR else '[dry-run]  '} {texto}")
+
+
+def simhub_rodando():
+    # ⚠️ `pgrep -f` casa a linha de comando inteira, entao um `wine taskkill /im
+    #    SimHubWPF.exe` em curso dispara falso positivo. Filtramos esses.
+    try:
+        out = subprocess.run(["pgrep", "-af", "SimHub[W]PF\\.exe"],
+                             capture_output=True, text=True)
+    except FileNotFoundError:
+        return False
+    for linha in out.stdout.splitlines():
+        if "taskkill" in linha or "pgrep" in linha:
+            continue
+        return True
+    return False
+
+
+def exigir_simhub_parado(acao):
+    """⚠️ O SimHub sobrescreve settings ao sair e segura a DLL. Mexer com ele de
+    pe' desfaz o trabalho em silencio — foi como perdemos instancias de device."""
+    if simhub_rodando():
+        sys.exit(f"{ERRO} o SimHub esta rodando. Feche-o antes de '{acao}'.\n"
+                 f"   (ele sobrescreve settings ao sair e mantem a DLL aberta)")
+
+
+def backup(caminho, sufixo):
+    """Copia com sufixo, sem sobrescrever backup anterior. Devolve o caminho."""
+    if not os.path.exists(caminho):
+        return None
+    alvo = f"{caminho}.{sufixo}"
+    if os.path.exists(alvo):
+        return alvo
+    passo(f"backup: {alvo}")
+    if APLICAR:
+        import shutil
+        shutil.copy2(caminho, alvo)
+    return alvo
+
+
+def importar_reg(conteudo, rotulo):
+    """Escreve um .reg e importa com regedit /S.
+
+    ⚠️ `reg add` NAO escreve REG_MULTI_SZ nem hex(ffff0012); .reg + regedit e' o
+    unico caminho que funciona (custou uma rodada de diagnostico na receita 2)."""
+    import tempfile
+    passo(f"importar registro: {rotulo}")
+    if not APLICAR:
+        for l in conteudo.strip().split("\n")[:6]:
+            print(f"           | {l}")
+        return
+    with tempfile.NamedTemporaryFile("w", suffix=".reg", delete=False,
+                                     encoding="utf-16") as f:
+        f.write(conteudo)
+        tmp = f.name
+    env = dict(os.environ, WINEPREFIX=PFX, WINEDEBUG="-all")
+    subprocess.run(["wine", "regedit", "/S", tmp], env=env,
+                   capture_output=True, text=True)
+    os.unlink(tmp)
+
+
+def multi_sz(linhas):
+    """REG_MULTI_SZ em .reg: hex(7) com UTF-16LE, cada string NUL-terminada."""
+    dados = b""
+    for l in linhas:
+        dados += l.encode("utf-16-le") + b"\x00\x00"
+    dados += b"\x00\x00"
+    return "hex(7):" + ",".join(f"{b:02x}" for b in dados)
+
+
+def devprop_string(texto):
+    r"""⚠️ DEVPKEY_* no Wine: tipo hex(ffff0012), UTF-16LE + 00 00.
+
+    Sem isso o SetupDiGetDevicePropertyW devolve erro 1168, o SimHub cai no
+    fallback do nome e a regex `\((COM\d+)\)` nao acha porta nenhuma."""
+    dados = texto.encode("utf-16-le") + b"\x00\x00"
+    return "hex(ffff0012):" + ",".join(f"{b:02x}" for b in dados)
+
+
+# ------------------------------------------------------------------------ acoes
+
+def instalar_udev():
+    print("\n== regras udev ==\n")
+    origem = os.path.join(REPO, "udev")
+    regras = sorted(glob.glob(os.path.join(origem, "*.rules")))
+    if not regras:
+        sys.exit(f"{ERRO} nenhuma regra em {origem}")
+    destino = "/etc/udev/rules.d"
+    for r in regras:
+        alvo = os.path.join(destino, os.path.basename(r))
+        igual = os.path.exists(alvo) and open(alvo).read() == open(r).read()
+        if igual:
+            print(f"  {OK} {os.path.basename(r)} ja instalada e identica")
+            continue
+        passo(f"sudo install -m644 {r} {alvo}")
+        if APLICAR:
+            subprocess.run(["sudo", "install", "-m", "644", r, alvo], check=True)
+    passo("sudo udevadm control --reload && sudo udevadm trigger")
+    if APLICAR:
+        subprocess.run(["sudo", "udevadm", "control", "--reload"], check=True)
+        subprocess.run(["sudo", "udevadm", "trigger"], check=True)
+    print(f"\n  {INFO} replugue o device (ou reinicie) se a ACL nao aparecer.\n")
+
+
+def instalar_registro():
+    """winebus: EnableHidraw + a rede de seguranca (Enable SDL=0 e DisableInput=1).
+
+    ⚠️ A chave e' Services\\winebus, NAO a subchave \\Parameters — o driver nunca
+    le' \\Parameters. Esse erro custou tres dias no projeto Conspit."""
+    print("\n== registro do prefixo (winebus) ==\n")
+    exigir_simhub_parado("install registry")
+    hid = sorted({f"{v}:{p}" for (v, p), (_, rec, _) in CATALOGO.items() if rec == "hid"})
+    reg = ("Windows Registry Editor Version 5.00\n\n"
+           "[HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\winebus]\n"
+           f'"EnableHidraw"={multi_sz(hid)}\n'
+           '"Enable SDL"=dword:00000000\n'
+           '"DisableInput"=dword:00000001\n')
+    print(f"  {INFO} EnableHidraw com {len(hid)} entradas ({hid[0]} ... {hid[-1]})")
+    backup(os.path.join(PFX, "system.reg"), "bak-simhub-devices")
+    importar_reg(reg, "Services\\winebus")
+    print(f"\n  {INFO} rode 'wineserver -k' para o winebus reler.\n")
+
+
+def instalar_ponte():
+    print("\n== ponte libusb (telas VoCore) ==\n")
+    exigir_simhub_parado("install bridge")
+    dll_origem = os.path.join(PONTE, "libusb-1.0.dll")
+    if not os.path.exists(dll_origem):
+        sys.exit(f"{ERRO} nao achei {dll_origem}\n"
+                 f"   clone e compile ~/apps/wine-libusb-bridge primeiro")
+    dll_alvo = os.path.join(SH_DIR, "libusb-1.0.dll")
+    orig = dll_alvo + ".orig"
+    if os.path.exists(dll_alvo) and not os.path.exists(orig):
+        passo(f"preservar a original: {orig}")
+        if APLICAR:
+            import shutil
+            shutil.copy2(dll_alvo, orig)
+    passo(f"instalar DLL da ponte em {dll_alvo}")
+    if APLICAR:
+        import shutil
+        shutil.copy2(dll_origem, dll_alvo)
+
+    # ⚠️ o helper precisa estar de pe' ANTES do SimHub, senao a DLL devolve erro.
+    #    Resolvido por LAUNCHER, nao por systemd user unit: o helper so' existe
+    #    para servir o SimHub, entao amarrar o tempo de vida dele ao do app evita
+    #    socket pendurado e o LIBUSB_ERROR_BUSY da proxima abertura.
+    lanc = os.path.join(REPO, "tools", "run-simhub")
+    if not os.path.exists(lanc):
+        print(f"  {AVISO} {lanc} nao encontrado")
+    else:
+        destino = os.path.expanduser("~/.local/bin/run-simhub")
+        passo(f"link {destino} -> {lanc}")
+        if APLICAR:
+            os.makedirs(os.path.dirname(destino), exist_ok=True)
+            if os.path.islink(destino) or os.path.exists(destino):
+                os.unlink(destino)
+            os.symlink(lanc, destino)
+    print(f"\n  {INFO} abra o SimHub com 'run-simhub' — ele sobe a ponte antes e a")
+    print(f"  {INFO} derruba depois. ⚠️ nunca com 'wine SimHubWPF.exe' direto: sem o")
+    print(f"  {INFO} lsu-launch-wrapper a telemetria nao chega.\n")
+
+
+def instalar_pdu5_leds():
+    """Patch do usagePage + remocao do NGen. ⚠️ OS DOIS, sempre.
+
+    Medido por eliminacao em 2026-08-19: so' o patch nao adianta (o app executa a
+    imagem nativa e ignora o IL); so' remover o NGen nao adianta (a collection
+    pedida continua errada). Por isso e' UM comando, nao dois."""
+    print("\n== PDU5/PDU7/LED Brows: usagePage + NGen ==\n")
+    exigir_simhub_parado("install pdu5-leds")
+    patcher = os.path.join(REPO, "tools", "pdu5-leds-patch.py")
+    passo(f"{patcher} --apply")
+    if APLICAR:
+        r = subprocess.run([sys.executable, patcher, "--apply"],
+                           capture_output=True, text=True)
+        print("           " + (r.stdout or r.stderr).strip().replace("\n", "\n           "))
+    limpar_ngen()
+    print(f"\n  {INFO} os dois passos sao necessarios — nenhum sozinho resolve.\n")
+
+
+def limpar_ngen():
+    """Move as imagens nativas de SimHub.Plug* para fora (reversivel)."""
+    imgs = ngen_ativo()
+    if not imgs:
+        print(f"  {OK} sem cache NGen de SimHub.Plugins")
+        return
+    guardado = os.path.join(PFX, "ngen-backup")
+    for nome in imgs:
+        passo(f"mover {nome} -> {guardado}/")
+        if APLICAR:
+            import shutil
+            os.makedirs(guardado, exist_ok=True)
+            destino = os.path.join(guardado, nome)
+            if os.path.exists(destino):
+                shutil.rmtree(destino)
+            shutil.move(os.path.join(NGEN, nome), destino)
+
+
+def limpar_cache():
+    print("\n== caches ==\n")
+    exigir_simhub_parado("clean-cache")
+    limpar_ngen()
+    print(f"\n  {INFO} entradas PnP obsoletas: veja 'doctor'; a limpeza delas exige")
+    print(f"  {INFO} editar system.reg com o wineserver parado (ainda manual).\n")
+
+
+def seriais_disponiveis():
+    return sorted(glob.glob("/dev/serial/by-id/*"))
+
+
+def instalar_serial(args):
+    """Receita 2: no PnP com DEVPKEY_NAME + porta COM + symlink.
+
+    ⚠️ Todos os volantes Conspit do catalogo do SimHub passam por aqui (medido em
+    2026-08-19: os 7 usam StandardProtocolManager). Nao e' um caso do H.AO."""
+    print("\n== receita 2: device serial -> porta COM ==\n")
+    if not args.dev:
+        print("  devices seriais disponiveis:\n")
+        for s_ in seriais_disponiveis():
+            print(f"    {s_}")
+        print(f"\n  {INFO} escolha um e rode:")
+        print(f"  {INFO}   simhub-devices install serial --dev <caminho> \\")
+        print(f"  {INFO}       --vid 3514 --pid 0007 --com 37 --nome 'CONSPIT H.AO' --apply\n")
+        return
+    exigir_simhub_parado("install serial")
+    if args.com <= 32:
+        sys.exit(f"{ERRO} use COM > 32. O wineboot preenche com1..com32 varrendo\n"
+                 f"   /dev/ttyS* e sobrescreve qualquer symlink nessa faixa.")
+
+    serial_usb = args.serial or os.path.basename(args.dev).split("_")[-1].split("-")[0]
+    rotulo = f"{args.nome} (COM{args.com})"
+    vid, pid = args.vid.upper(), args.pid.upper()
+    base = ("HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Enum\\USB"
+            f"\\VID_{vid}&PID_{pid}\\{serial_usb}")
+    NOME = "{b725f130-47ef-101a-a5f1-02608c9eebac}"      # DEVPKEY_NAME
+    FRIENDLY = "{a45c254e-df1c-4efd-8020-67d146a850e0}"  # DEVPKEY_Device_FriendlyName
+
+    linhas = [
+        "Windows Registry Editor Version 5.00", "",
+        f"[{base}]",
+        '"Class"="Ports"',
+        '"ClassGUID"="{4d36e978-e325-11ce-bfc1-08002be10318}"',
+        f'"FriendlyName"="{rotulo}"',
+        '"Service"="Serial"',
+        '"ConfigFlags"=dword:00000000',
+        f'"HardwareId"="USB\\VID_{vid}&PID_{pid}"', "",
+        f"[{base}\\Device Parameters]",
+        f'"PortName"="COM{args.com}"', "",
+        # ⚠️ e' ESTA subchave que o SimHub le'; sem ela o nome cai no fallback
+        f"[{base}\\Properties\\{NOME}\\000A]",
+        f'@={devprop_string(rotulo)}', "",
+        f"[{base}\\Properties\\{FRIENDLY}\\000E]",
+        f'@={devprop_string(rotulo)}', "",
+        "[HKEY_LOCAL_MACHINE\\Software\\Wine\\Ports]",
+        f'"COM{args.com}"="{args.dev}"', "",
+    ]
+    backup(os.path.join(PFX, "system.reg"), "bak-serial")
+    importar_reg("\n".join(linhas), f"COM{args.com} -> {args.nome}")
+
+    link = os.path.join(PFX, "dosdevices", f"com{args.com}")
+    passo(f"symlink {link} -> {args.dev}")
+    if APLICAR:
+        if os.path.islink(link) or os.path.exists(link):
+            os.unlink(link)
+        os.symlink(args.dev, link)
+    print(f"\n  {INFO} rode 'wineserver -k': o SERIALCOMM e' volatil e so' e'")
+    print(f"  {INFO} repovoado quando o wineserver reinicia.\n")
+
+
+def pos_update():
+    """O que um update do SimHub desfaz, em silencio, toda vez."""
+    print("\n== pos-update do SimHub ==\n")
+    print(f"  {INFO} um update reinstala a libusb-1.0.dll e roda ngen de novo.")
+    print(f"  {INFO} sem os dois passos abaixo, a tela e a PDU5 param sem avisar.\n")
+    exigir_simhub_parado("post-update")
+    instalar_ponte()
+    instalar_pdu5_leds()
+
+
+def main():
+    global APLICAR
+    import argparse
+    ap = argparse.ArgumentParser(prog="simhub-devices", add_help=True,
+                                 description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--apply", action="store_true",
+                    help="executa de fato (sem isso, so' mostra o que faria)")
+    # ⚠️ --apply aceito em qualquer posicao: `install bridge --apply` e' o que a
+    #    mao digita naturalmente, e errar isso vira "por que nao fez nada?"
+    comum = argparse.ArgumentParser(add_help=False)
+    comum.add_argument("--apply", action="store_true", dest="apply2")
+    sub = ap.add_subparsers(dest="cmd")
+    sub.add_parser("doctor", parents=[comum])
+    ins = sub.add_parser("install", parents=[comum]).add_subparsers(dest="alvo")
+    for nome_ in ("udev", "registry", "bridge", "pdu5-leds"):
+        ins.add_parser(nome_, parents=[comum])
+    ser = ins.add_parser("serial", parents=[comum])
+    ser.add_argument("--dev"); ser.add_argument("--vid", default="3514")
+    ser.add_argument("--pid", default="0007"); ser.add_argument("--com", type=int, default=37)
+    ser.add_argument("--serial"); ser.add_argument("--nome", default="SERIAL DEVICE")
+    sub.add_parser("post-update", parents=[comum])
+    sub.add_parser("clean-cache", parents=[comum])
+
+    a = ap.parse_args()
+    APLICAR = a.apply or getattr(a, "apply2", False)
+    if not a.cmd or a.cmd == "doctor":
+        doctor(); return
+    if a.cmd == "post-update":
+        pos_update()
+    elif a.cmd == "clean-cache":
+        limpar_cache()
+    elif a.cmd == "install":
+        acoes = {"udev": instalar_udev, "registry": instalar_registro,
+                 "bridge": instalar_ponte, "pdu5-leds": instalar_pdu5_leds}
+        if a.alvo in acoes:
+            acoes[a.alvo]()
+        elif a.alvo == "serial":
+            instalar_serial(a)
+        else:
+            sys.exit("install: use udev | registry | bridge | pdu5-leds | serial")
+    if not APLICAR:
+        print(f"  {AVISO} DRY-RUN — nada foi alterado. Repita com --apply.\n")
+
+
+if __name__ == "__main__":
+    main()

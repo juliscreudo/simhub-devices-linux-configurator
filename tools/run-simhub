@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# run-simhub — sobe a ponte libusb e o SimHub, na ordem certa, e limpa ao sair.
+#
+# Por que um launcher e nao um systemd user service: o helper so' existe para
+# servir o SimHub. Uma unit `enabled` ficaria de pe' desde o login segurando
+# socket e enumerando USB para um app aberto de vez em quando -- e a ordem
+# "helper antes do SimHub" viraria corrida com o default.target, quando aqui ela
+# precisa ser estrutural.
+#
+# ⚠️ Tres armadilhas que este script existe para evitar:
+#   1. O helper PRECISA estar no ar antes do SimHub. Se nao estiver, a DLL da
+#      ponte devolve erro e a tela VoCore simplesmente nao conecta.
+#   2. Suba o SimHub pelo lsu-launch-wrapper, NUNCA com `wine SimHubWPF.exe`.
+#      Por fora do wrapper o app abre e os devices funcionam, mas a TELEMETRIA
+#      nao chega: e' o wrapper que sobe o winehub. Sintoma longe da causa.
+#   3. Helper pendurado depois que o SimHub morre deixa a interface USB
+#      reivindicada -> LIBUSB_ERROR_BUSY na proxima abertura.
+
+set -u
+
+PONTE="${PONTE:-$HOME/apps/wine-libusb-bridge}"
+LSU="${LSU:-$HOME/apps/linux-simracing-utils}"
+HELPER="$PONTE/libusb-bridge-helper"
+WRAPPER="$LSU/bin/lsu-launch-wrapper"
+SIMHUB_EXE='C:\Program Files (x86)\SimHub\SimHubWPF.exe'
+PORTA=47100
+
+erro() { printf '\033[31merro:\033[0m %s\n' "$1" >&2; exit 1; }
+info() { printf '\033[36m[run-simhub]\033[0m %s\n' "$1"; }
+
+[ -x "$HELPER" ]  || erro "helper nao encontrado ou sem permissao de execucao: $HELPER"
+[ -x "$WRAPPER" ] || erro "lsu-launch-wrapper nao encontrado: $WRAPPER"
+
+porta_ocupada() { ss -ltn 2>/dev/null | grep -q ":$PORTA "; }
+
+NOSSO_HELPER=""
+if porta_ocupada; then
+    info "ponte ja estava no ar (porta $PORTA) — nao vou mexer nela"
+else
+    info "subindo a ponte libusb..."
+    "$HELPER" &
+    NOSSO_HELPER=$!
+    for _ in $(seq 1 25); do
+        porta_ocupada && break
+        sleep 0.2
+    done
+    porta_ocupada || erro "a ponte nao subiu (porta $PORTA nao escutou em 5s)"
+    info "ponte no ar (pid $NOSSO_HELPER)"
+fi
+
+limpar() {
+    if [ -n "$NOSSO_HELPER" ] && kill -0 "$NOSSO_HELPER" 2>/dev/null; then
+        info "encerrando a ponte (pid $NOSSO_HELPER)"
+        kill "$NOSSO_HELPER" 2>/dev/null
+        wait "$NOSSO_HELPER" 2>/dev/null
+    fi
+}
+trap limpar EXIT INT TERM
+
+info "abrindo o SimHub pelo lsu-launch-wrapper"
+"$WRAPPER" "$SIMHUB_EXE"
+
+# O wrapper devolve o controle assim que o SimHub e' lancado em segundo plano,
+# entao esperamos o processo de verdade sumir antes de derrubar a ponte.
+sleep 5
+while pgrep -f 'SimHub[W]PF\.exe' >/dev/null 2>&1; do
+    sleep 3
+done
+info "SimHub encerrado"
