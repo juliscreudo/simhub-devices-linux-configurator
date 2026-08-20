@@ -51,8 +51,9 @@ junto. Precedência de busca: `$SIMHUB_PONTE` → `vendor/` → `~/apps/wine-lib
 (cópia de desenvolvimento). `SIMHUB_PONTE_VERSION` fixa uma tag, como `LSU_WINECARTE_VERSION`
 faz lá.
 
-⚠️ A ponte **ainda não tem remote**, então `SIMHUB_PONTE_REPO` está vazio e o instalador cai
-na cópia local. Publicá-la é o passo que falta para a pilha ser instalável por terceiros.
+O repo da ponte é `github.com/juliscreudo/wine-libusb-bridge`. ⚠️ Enquanto não houver uma
+**release publicada** (tag), o instalador não acha tarball e cai na cópia local — que é o
+comportamento correto, não um erro.
 
 - `~/apps/linux-simracing-utils/` — **de terceiro** (srounce), instalador de SimHub/CrewChief
   no Linux + Winecarte. É o prefixo onde o SimHub roda: `~/apps/linux-simracing-utils/pfx`.

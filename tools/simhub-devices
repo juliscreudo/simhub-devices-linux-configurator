@@ -240,7 +240,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # versao num arquivo. A ponte e' produto generico (serve qualquer app Windows sob
 # Wine com libusb sincrona); pendura-la dentro de um repo de sim racing inverteria
 # o desenho que motivou separar as duas.
-PONTE_REPO = os.environ.get("SIMHUB_PONTE_REPO", "")   # "<owner>/<repo>"; vazio = nao publicada
+PONTE_REPO = os.environ.get("SIMHUB_PONTE_REPO", "juliscreudo/wine-libusb-bridge")
 PONTE_VERSAO = os.environ.get("SIMHUB_PONTE_VERSION", "")   # vazio = ultima release
 VENDOR = os.path.join(REPO, "vendor", "wine-libusb-bridge")
 ARQ_VERSAO = os.path.join(REPO, ".ponte-version")
