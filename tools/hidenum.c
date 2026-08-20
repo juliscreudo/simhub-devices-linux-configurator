@@ -7,6 +7,15 @@
  *
  *   sem argumento  -> TODOS os devices
  *   com argumentos -> so' os VIDs dados, em hex (ex: `hidenum 0483 c872`)
+ *   --serial       -> mostra o instance ID inteiro (por padrao e' mascarado)
+ *
+ * ⚠️ O DevicePath embute o NUMERO DE SERIE do device, e a saida desta ferramenta
+ * e' justamente o que os READMEs pedem para colar num issue. Serial nao e'
+ * metadado: varios fabricantes o usam como prova de titularidade em garantia.
+ * Por isso o instance ID sai como <INSTANCIA> por padrao -- VID/PID, caps e
+ * usage, que sao o dado tecnico, continuam completos. Use --serial quando
+ * precisar distinguir duas unidades iguais (LedsGenericManagerWithSerialNumber)
+ * e a saida NAO for sair da sua maquina.
  *
  * ⚠️ Derivado do ~/apps/conspit-ares-linux/tools/hidenum.c, que tem o filtro
  * `attr.VendorID == 0x3514` CRAVADO NO CODIGO. Rodar aquele aqui devolve
@@ -26,17 +35,52 @@
 #include <hidsdi.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+
+static int mostrar_serial = 0;
 
 static int vid_pedido(int argc, char **argv, unsigned vid)
 {
-    if (argc < 2) return 1;                 /* sem filtro: tudo */
-    for (int i = 1; i < argc; i++)
+    int tem_filtro = 0;
+    for (int i = 1; i < argc; i++) {
+        if (argv[i][0] == '-') continue;    /* opcao, nao e' VID */
+        tem_filtro = 1;
         if ((unsigned)strtoul(argv[i], NULL, 16) == vid) return 1;
-    return 0;
+    }
+    return !tem_filtro;                     /* sem filtro: tudo */
+}
+
+/* `\\?\hid#vid_0483&pid_cb01&mi_00#<INSTANCIA>#{guid}` -- o terceiro campo e'
+ * o instance ID, que carrega o serial. Mascara-o preservando o resto. */
+static void print_path(const WCHAR *p)
+{
+    if (mostrar_serial) { printf("%ls\n", p); return; }
+    const WCHAR *a = NULL, *b = NULL;
+    int n = 0;
+    for (const WCHAR *q = p; *q; q++)
+        if (*q == L'#') { n++; if (n == 2) a = q; else if (n == 3) { b = q; break; } }
+    if (!a || !b) { printf("%ls\n", p); return; }
+    printf("%.*ls#<INSTANCIA>%ls\n", (int)(a - p), p, b);
+}
+
+/* VID a partir do proprio DevicePath (`\\?\hid#vid_0483&pid_cb40#...`), para
+ * quando nao ha' handle: sem isto o ramo [sem acesso] ignorava o filtro e
+ * `hidenum 0483` despejava device de todo VID, contrariando o proprio uso. */
+static unsigned vid_do_path(const WCHAR *p)
+{
+    for (; *p; p++) {
+        if ((p[0] == L'v' || p[0] == L'V') && (p[1] == L'i' || p[1] == L'I') &&
+            (p[2] == L'd' || p[2] == L'D') && p[3] == L'_')
+            return (unsigned)wcstoul(p + 4, NULL, 16);
+    }
+    return 0xFFFFFFFFu;                     /* desconhecido: nunca casa filtro */
 }
 
 int main(int argc, char **argv)
 {
+    for (int i = 1; i < argc; i++)
+        if (!strcmp(argv[i], "--serial")) mostrar_serial = 1;
+
     GUID guid;
     HidD_GetHidGuid(&guid);
 
@@ -49,6 +93,10 @@ int main(int argc, char **argv)
     for (DWORD i = 0; SetupDiEnumDeviceInterfaces(set, NULL, &guid, i, &iface); i++) {
         DWORD need = 0;
         SetupDiGetDeviceInterfaceDetailW(set, &iface, NULL, 0, &need, NULL);
+        /* ⚠️ a primeira chamada SEMPRE "falha" (ERROR_INSUFFICIENT_BUFFER); o que
+         * importa e' `need`. Se ela falhar por outro motivo, need fica 0 e o
+         * `det->cbSize = ...` abaixo escreveria fora de uma alocacao vazia. */
+        if (need < sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W)) continue;
         SP_DEVICE_INTERFACE_DETAIL_DATA_W *det = malloc(need);
         if (!det) continue;
         det->cbSize = sizeof(*det);
@@ -85,15 +133,15 @@ int main(int argc, char **argv)
                        caps.UsagePage, caps.Usage,
                        caps.InputReportByteLength, caps.OutputReportByteLength,
                        caps.FeatureReportByteLength, prod);
-                printf("    path: %ls\n", det->DevicePath);
+                printf("    path: "); print_path(det->DevicePath);
                 mostrados++;
             }
             CloseHandle(h);
-        } else {
+        } else if (vid_pedido(argc, argv, vid_do_path(det->DevicePath))) {
             /* Nao da' para ler VID/PID sem handle: o proprio DevicePath os
-             * carrega (hid#vid_xxxx&pid_xxxx...). Imprime sempre -- sumir da
-             * lista e' pior que aparecer incompleto. */
-            printf("[sem acesso] %ls\n", det->DevicePath);
+             * carrega (hid#vid_xxxx&pid_xxxx...), e e' de la' que sai o filtro.
+             * Imprime -- sumir da lista e' pior que aparecer incompleto. */
+            printf("[sem acesso] "); print_path(det->DevicePath);
             mostrados++;
         }
         free(det);

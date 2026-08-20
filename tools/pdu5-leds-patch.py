@@ -26,6 +26,8 @@ Uso:
     pdu5-leds-patch.py --apply   [...]      (cria .bak-pdu5 antes)
     pdu5-leds-patch.py --revert  [...]
 
+Saida de --check:  0 = nada pendente   1 = patch pendente   2 = erro
+
 ⚠️ ESTE PATCH SOZINHO NAO BASTA — O NGEN ENGOLE ELE.
 
 O prefixo tem imagem nativa pre-compilada de SimHub.Plugins em
@@ -34,7 +36,7 @@ e o SimHub roda 32-bit, entao ele executa a imagem nativa e IGNORA o IL patchead
 Sondas compiladas com /platform:x64 JIT-am o IL do disco e "provam" que o patch
 funciona — enquanto o app nao muda nada. Custou um dia inteiro de diagnostico.
 
-Depois de aplicar o patch, remova as imagens nativas:
+`simhub-devices install pdu5-leds --apply` faz os dois passos de uma vez. A mao:
 
     NI=~/apps/linux-simracing-utils/pfx/drive_c/windows/assembly/NativeImages_v4.0.30319_32
     mv "$NI"/SimHub.Plug* /caminho/de/backup/
@@ -46,57 +48,60 @@ import os
 import shutil
 import sys
 
+# realpath, nao abspath: estes scripts tambem podem ser chamados por symlink,
+# e ai o abspath aponta para o diretorio do link, sem o ilcommon.py ao lado.
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import ilcommon
+
 PADRAO_ORIG = bytes([0x20, 0xFF, 0x00, 0x00, 0x00, 0x17])   # ldc.i4 0xFF ; ldc.i4.1
 PADRAO_NOVO = bytes([0x20, 0x01, 0x00, 0x00, 0x00, 0x1A])   # ldc.i4 1    ; ldc.i4.4
 
 # managers que sofrem do mesmo problema (usagePage 0xFF): PDU5, PDU7, LED Brows
 ALVOS = ("PokornyiPEPDU5Manager", "PokornyiPEPDU7Manager", "PokornyiLedBrowsManager")
+METODO = "GetDriver"
 
 PADRAO_DLL = os.path.expanduser(
     "~/apps/linux-simracing-utils/pfx/drive_c/Program Files (x86)/SimHub/SimHub.Plugins.dll")
 
 
-def corpos_dos_alvos(caminho):
-    """Offsets de arquivo dos corpos de GetDriver dos managers alvo."""
-    import dnfile
-    dn = dnfile.dnPE(caminho)
+def corpos_dos_alvos(caminho, dados):
+    """[(tipo, inicio do IL, tamanho do IL)] dos GetDriver dos managers alvo.
+
+    ⚠️ O tamanho vem do cabecalho do metodo, nunca de uma janela fixa. Uma janela
+    de N bytes passa do fim do metodo curto e encontra o padrao no metodo
+    SEGUINTE -- e o patch sai silencioso e no lugar errado.
+    """
+    dn, _ = ilcommon.abrir(caminho)
     if dn.net.Flags.CLR_STRONGNAMESIGNED:
-        sys.exit("ERRO: assembly e' strong-named; patch invalidaria a assinatura.")
+        raise SystemExit("ERRO: assembly e' strong-named; patch invalidaria a assinatura.")
+    return [(t, ini, tam) for t, m, ini, tam in ilcommon.metodos(dn, dados)
+            if t in ALVOS and m == METODO]
 
-    secoes = dn.sections
 
-    def rva2off(rva):
-        for s in secoes:
-            if s.VirtualAddress <= rva < s.VirtualAddress + max(s.Misc_VirtualSize, s.SizeOfRawData):
-                return rva - s.VirtualAddress + s.PointerToRawData
-        return None
-
-    achados = []
-    tdefs = dn.net.mdtables.TypeDef
-    for i, td in enumerate(tdefs.rows):
-        nome = str(td.TypeName)
-        if nome not in ALVOS:
-            continue
-        for m in td.MethodList:
-            mrow = m.row
-            if mrow is None or str(mrow.Name) != "GetDriver" or not mrow.Rva:
-                continue
-            off = rva2off(mrow.Rva)
-            if off is None:
-                continue
-            achados.append((nome, off))
+def ocorrencias(buf, padrao):
+    achados, i = [], buf.find(padrao)
+    while i >= 0:
+        achados.append(i)
+        i = buf.find(padrao, i + 1)
     return achados
 
 
-def janela(dados, off, tam=512):
-    """O corpo do metodo comeca no cabecalho; 512 bytes cobrem estes GetDriver."""
-    return off, dados[off:off + tam]
+def escrever_atomico(caminho, dados):
+    """⚠️ SimHub.Plugins.dll tem ~26 MB. Escrever por cima e' uma janela em que
+    uma interrupcao deixa a DLL truncada; o os.replace troca o nome de uma vez."""
+    tmp = caminho + ".tmp-pdu5"
+    with open(tmp, "wb") as f:
+        f.write(dados)
+        f.flush()
+        os.fsync(f.fileno())
+    shutil.copystat(caminho, tmp)
+    os.replace(tmp, caminho)
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description="patch do usagePage dos managers PDU5/PDU7/LED Brows")
     g = ap.add_mutually_exclusive_group(required=True)
-    g.add_argument("--check", action="store_true")
+    g.add_argument("--check", action="store_true", help="so' relata (0 = nada pendente, 1 = pendente)")
     g.add_argument("--apply", action="store_true")
     g.add_argument("--revert", action="store_true")
     ap.add_argument("dll", nargs="?", default=PADRAO_DLL)
@@ -107,46 +112,51 @@ def main():
 
     if args.revert:
         if not os.path.exists(bak):
-            sys.exit("sem backup em " + bak)
+            raise SystemExit("sem backup em " + bak)
         shutil.copy2(bak, dll)
         print("revertido a partir de", bak)
-        return
+        return 0
 
     if not os.path.exists(dll):
-        sys.exit("nao encontrei " + dll)
-    dados = bytearray(open(dll, "rb").read())
+        raise SystemExit("nao encontrei " + dll)
+    ilcommon.exigir_dnfile()
+    with open(dll, "rb") as f:
+        dados = bytearray(f.read())
 
-    alvos = corpos_dos_alvos(dll)
+    alvos = corpos_dos_alvos(dll, dados)
     if not alvos:
-        sys.exit("nenhum manager alvo encontrado (SimHub mudou de versao?)")
+        raise SystemExit("nenhum manager alvo encontrado (SimHub mudou de versao?)")
 
     pendentes = []
-    for nome, off in alvos:
-        base, buf = janela(dados, off)
-        i_orig = buf.find(PADRAO_ORIG)
-        i_novo = buf.find(PADRAO_NOVO)
-        if i_orig >= 0:
-            print(f"  {nome:26s} offset 0x{base + i_orig:06X}  usagePage 0xFF/1  -> PRECISA DE PATCH")
-            pendentes.append(base + i_orig)
-        elif i_novo >= 0:
-            print(f"  {nome:26s} offset 0x{base + i_novo:06X}  usagePage 1/4     -> ja corrigido")
+    for nome, ini, tam in alvos:
+        buf = bytes(dados[ini:ini + tam])
+        orig, novo = ocorrencias(buf, PADRAO_ORIG), ocorrencias(buf, PADRAO_NOVO)
+        if len(orig) > 1:
+            # duas constantes iguais no mesmo corpo: qual delas e' o usagePage?
+            print(f"  {nome:26s} {len(orig)} ocorrencias do padrao -- AMBIGUO, NAO mexer")
+        elif orig:
+            print(f"  {nome:26s} offset 0x{ini + orig[0]:06X}  usagePage 0xFF/1  -> PRECISA DE PATCH")
+            pendentes.append(ini + orig[0])
+        elif novo:
+            print(f"  {nome:26s} offset 0x{ini + novo[0]:06X}  usagePage 1/4     -> ja corrigido")
         else:
             print(f"  {nome:26s} padrao nao encontrado -- NAO mexer")
 
     if args.check:
-        return
+        return 1 if pendentes else 0
     if not pendentes:
         print("nada a fazer")
-        return
+        return 0
 
     if not os.path.exists(bak):
         shutil.copy2(dll, bak)
         print("backup:", bak)
     for off in pendentes:
         dados[off:off + len(PADRAO_ORIG)] = PADRAO_NOVO
-    open(dll, "wb").write(bytes(dados))
+    escrever_atomico(dll, bytes(dados))
     print(f"aplicado em {len(pendentes)} manager(s). Reinicie o SimHub.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
