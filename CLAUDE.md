@@ -1,6 +1,7 @@
 # SimHub Devices no Linux — fazer a aba Devices reconhecer volantes e caixas de botões
 
-Repo deste projeto: `~/apps/simhub-devices-linux/`.
+Repo deste projeto: `~/apps/simhub-devices-linux-configurator/` (ex-`simhub-devices-linux`,
+renomeado em 2026-08-20 para seguir o padrão do irmão `conspit-linux-configurator`).
 
 **O que este projeto resolve:** no Linux o SimHub roda sob Wine e a aba **Devices** fica em
 `Searching device ...` para sempre — LEDs, telas e botões de volantes não conectam. Isso não
@@ -16,6 +17,36 @@ solução são os **LEDs** da PDU5, por um motivo próprio e diagnosticado (seç
 SimHub**, medida mas **não testada com hardware** — está marcado como tal ao longo do
 arquivo. Não apague essas marcas ao editar; elas são o que separa o que sabemos do que
 supomos.
+
+## Checklist — o que já custou caro esquecer
+
+Cada item abaixo já causou horas ou dias de diagnóstico errado; o detalhe e a evidência estão
+na seção que ele referencia.
+
+- **Registro sempre em `Services\winebus`, nunca em `\Parameters`** — o driver não lê a
+  segunda chave (custou 3 dias no projeto irmão; Receitas 1 e 2).
+- **`EnableHidraw` sozinho quase não faz nada** — o passo que destrava um HID novo é a regra
+  **udev** (Receita 1).
+- **Depois de todo update do SimHub**: reinstalar `libusb-1.0.dll` da ponte **e** remover de
+  novo `SimHub.Plug*` de `NativeImages_v4.0.30319_32/` — os dois voltam sozinhos, e sem o
+  segundo, patch de IL vira no-op (armadilha do NGen).
+- **`tools/hidenum.exe` é o deste repo, não o do projeto Conspit** — aquele tem VID `0x3514`
+  cravado e devolve lista vazia pra Pokornyi/Cube Controls, parecendo que o device não existe.
+- **`wineserver -k` depois de mexer em registro, porta serial ou `EnableHidraw`** — são
+  valores voláteis/cacheados; a mudança só aparece após reiniciar.
+- **Enumeração HID tem corrida**: meça na segunda passada do `hidenum`, ~3 s depois do
+  `wineserver -k`.
+- **Sondas e patches de IL: leitura por padrão, nunca escrever na firmware.** Registro do
+  prefixo é reversível; firmware não.
+- **Base Conspit Ares é 20 Nm** — nunca mande `=`, `sys.0.save`, `sys.0.format` ou `odrv.*`
+  numa porta que possa ser a base (ver Segurança).
+- **Entradas PnP obsoletas travam device em silêncio** — apague `Enum\HID\VID_xxxx&PID_xxxx*`
+  remanescente e deixe o Wine recriar.
+- **`ConspitManager.GetDriver()` é compartilhado** entre haptics e LEDs — um device parcial
+  derruba os dois caminhos, e o sintoma aparece longe da causa.
+- Erros `FindGamePath`/`CompatibilityStoreHelper` no log **não são** de device — ignore ao
+  diagnosticar.
+- `strings` sozinho não acha nomes em app .NET/Qt — use `strings -el` (UTF-16).
 
 ## Projetos irmãos
 
@@ -39,7 +70,7 @@ linux-simracing-utils   instala o SimHub e cria o prefixo Wine
        ↓
 wine-libusb-bridge      faz a libusb funcionar sob Wine (telas VoCore)
        ↓
-simhub-devices-linux    configura os devices na aba Devices        ← aqui
+simhub-devices-linux-configurator  configura os devices na aba Devices        ← aqui
 ```
 
 `tools/simhub-devices doctor` checa a pilha inteira nessa ordem.
@@ -78,6 +109,14 @@ Duas técnicas, ambas com ferramenta neste repo:
 ⚠️ Os managers do catálogo estão em **`SimHub.Plugins.dll`**
 (`SimHub.Plugins.OutputPlugins.GraphicalDash.PSE.*`); os drivers, em **`BA63Driver.dll`**.
 Procurar o manager na DLL errada devolve vazio e parece que ele não existe.
+
+**Dois subagentes em `.claude/agents/` empacotam os fluxos recorrentes** — ambos read-only, com
+as armadilhas de método já embutidas:
+
+| agente | quando |
+|---|---|
+| `device-triage` | device não conecta na aba Devices — roda `doctor`, lê o log, aplica as 3 checagens e devolve a classe de falha |
+| `il-recon` | medir constante/chamada no IL ofuscado (VID/PID, `usagePage`/`usage`, quem chama o quê) |
 
 Precisa de `dnfile` (`pip install dnfile` num venv; ⚠️ PEP 668 barra `pip` global no Arch).
 
@@ -498,6 +537,15 @@ patch no SimHub, nenhum `mpro_drm`.
   fora do wrapper o app abre e os devices funcionam, mas **a telemetria não chega**: é o
   wrapper que sobe o `winehub`, o daemon que espelha a memória compartilhada do jogo para
   dentro do prefixo (via `wine2linux.exe`). Sintoma longe da causa; custou um diagnóstico.
+- ⚠️ **O atalho de menu que o `winemenubuilder` do Wine gera sozinho
+  (`wine/Programs/SimHub/SimHub.desktop`) chama o `lsu-launch-wrapper` direto, sem subir o
+  helper antes** — abrir por ele faz a tela falhar mesmo com tudo certo, porque a DLL da ponte
+  devolve erro na primeira chamada sem o helper de pé. Não dá pra editar/esconder aquele
+  `.desktop`: o Wine o recria a cada reinstall/update, e a mesma armadilha já tinha sido
+  resolvida para o ConspitLink no projeto irmão. `simhub-devices install shortcut` lê o
+  `Icon=` do atalho do Wine e escreve um atalho próprio em `~/.local/share/applications/` com
+  `Exec=run-simhub`; os dois convivem com o mesmo `Name=SimHub`. Confirmado com o GTB Pro:
+  reaberto pelo atalho novo, a tela conectou junto com os LEDs.
 - ⚠️ O helper faz **fork por conexão** e limpa tudo quando o cliente cai. Sem isso: o SimHub
   mantém mais de um `SubProcess.X86.exe` vivo e (a) o velho segurava o único slot do helper,
   derrubando o novo com `TimeoutException` no `ConnectToScreen`, e (b) a interface ficava
@@ -507,129 +555,47 @@ patch no SimHub, nenhum `mpro_drm`.
   a tela como input, já que nenhum driver a reivindica.
 - ⚠️ O que **não** foi resolvido por isto: os **LEDs** da PDU5 (`usagePage 0xFF`).
 
-### Por que o caminho nativo do Wine não fecha (o diagnóstico que levou à ponte)
+### Por que o caminho nativo do Wine não fecha — e por que não vale reabrir
 
-O `ScreenUSBRequest` dos volantes com tela pede **VID `0xC872` PID `0x1004`** com
-`HasParentHub=True`. Todas as telas VoCore compartilham esse mesmo VID/PID: são
-indistinguíveis entre si. **O SimHub descobre a qual volante cada tela pertence subindo a
-árvore USB até o hub pai** (`PortSignature` / `UsbPath` no `WoteverCommon`).
+Arqueologia de 2026-08-16/18, resumida. Vale como registro de **"não tente de novo"**; a ponte
+tornou os dois bloqueios abaixo irrelevantes, contornando-os em vez de resolvê-los.
 
-**No Wine essa árvore não existe.** Medido: `PortSignature` e `UsbPath` lançam
-`NullReferenceException` para **100% dos devices** (0 de 125), porque o `DeviceType` sai do
-nome do Service — `usbxhci` → Controller, `winehid`/`winebus` → Device — e **nenhum
-controlador USB é exposto**. Sem controlador não há caminho para subir.
+O caminho do SimHub é `SimHub.BitmapDisplay.Vocore.dll` → `SimHub.LibUsbNative.dll` →
+`libusb-1.0.dll`: **libusb puro**, a tela escrita como device USB bruto por endpoints bulk
+(interface única `ff/ff/ff`, `ep_02` OUT + `ep_81` IN, nenhum driver de kernel ocupando). Não é
+driver de display — essa hipótese foi descartada.
 
-Não há correção por registro: exigiria o Wine expor topologia USB. Caminhos possíveis, em
-ordem de custo: (a) confirmar com hardware se os **LEDs** do volante conectam sozinhos
-(provável, e resolve boa parte do valor); (b) issue no Wine; (c) shim que sintetize a
-hierarquia. **Não comece por (c).**
+⚠️ **Os dois becos sem saída, ambos medidos — não reabra nenhum:**
 
-### O "driver da VoCore": investigado em 2026-08-16 — é libusb, não driver de display
+1. **Nenhum driver ligado ao nó USB.** O nó nasce sem `Service` e sem interface registrada, e a
+   libusb classifica device *lendo qual driver está ligado*. No Windows o instalador do SimHub
+   liga o **WinUSB** (o que o Zadig faz); **não tente reproduzir isso no prefixo** — instalaria
+   um driver de kernel do Windows que o Wine não executa. E não adiantaria: **a `winusb.dll` do
+   Wine é stub** (medido: `"(%p) - stub"` nas strings). Não há hoje nada no Wine que faça o
+   backend Windows da libusb funcionar.
+2. **Wine não expõe controlador USB**, logo não há árvore para subir: `PortSignature` e
+   `UsbPath` lançam `NullReferenceException` para **100% dos devices** (0 de 125). Como todas as
+   telas VoCore são `c872:1004` — indistinguíveis —, o SimHub as casa com o volante subindo até
+   o hub pai, e sem árvore isso é impossível **pelo PnP**. A ponte resolve porque o SimHub pede
+   essa topologia **à própria libusb** (`libusb_get_parent`, `get_port_numbers`,
+   `get_bus_number`), e a árvore real do Linux a tem — enumeração e identificação de uma vez.
 
-A hipótese antiga (driver de display USB) está **descartada**. O caminho do SimHub é
+✅ **O que continua vivo desta seção:** a permissão do nó USB. `/dev/bus/usb/BBB/DDD` nasce sem
+`rw` para o usuário e a libusb precisa dele para `libusb_claim_interface`; sem isso a tela é
+descartada em silêncio. É o que `udev/70-vocore.rules` corrige (PID `1004` exato — `c872` é
+também o VID da Cube Controls).
 
-```
-SimHub.BitmapDisplay.Vocore.dll -> SimHub.LibUsbNative.dll -> libusb-1.0.dll
-```
+⚠️ Detalhe de construção da ponte (as 32 funções, convenções `stdcall`, marshaling, ABI) mora no
+repo dela, com `make check-abi` guardando o contrato. Não é replicado aqui.
 
-— libusb puro, a tela é escrita como device USB bruto por endpoints bulk (medido no
-hardware: interface única `ff/ff/ff`, `ep_02` OUT + `ep_81` IN, **nenhum driver do kernel**
-ocupando). O que o instalador do SimHub faz no Windows é **ligar o WinUSB ao device** (o que
-o Zadig faz), porque no Windows a libusb não fala com device sem WinUSB/libusbK ligado.
-**Não tente reproduzir esse passo no prefixo**: instalaria um driver de kernel do Windows
-que o Wine não executa.
+### Fallback fora do SimHub: `mpro_drm` — ⚠️ SUPERADO, e não convive com a ponte
 
-⚠️ **Correção (2026-08-16, apontada pelo usuário):** este arquivo chegou a afirmar que "a
-`winusb.dll` builtin do Wine é implementada sobre a libusb do host". **Falso** — a
-`winusb.dll` do Wine é **stub** (medido: `"(%p) - stub"` nas strings do binário). Não há
-hoje NADA no Wine que faça o backend Windows da libusb funcionar. O usuário conferiu o
-`wine uninstaller` e notou a ausência dos instaladores de driver (VoCore, AX206) que o
-SimHub instala no Windows — a ausência é sintoma esperado (instalador de driver de kernel
-não roda sob Wine), mas a réplica dele a esta suposição é que forçou a medição do stub.
+Driver DRM da VoCore (Vonger), em `~/apps/mpro_drm` (código de terceiro, fora deste repo) com
+`linux-7.1-api.patch` para a API DRM atual. ⚠️ Kernel CachyOS é clang/LTO: `make LLVM=1`.
 
-Isso torna o sintoma legível na UI: a aba da tela mostra **`Screen ID` vazio** e
-`Connection status: Not found` porque a enumeração de telas volta **lista vazia**.
-
-**Dois bloqueios em série, ambos medidos:**
-
-1. **Permissão do nó USB — RESOLVIDO.** `/dev/bus/usb/BBB/DDD` nasce `crw-rw-r--` (só
-   leitura para o usuário) e a libusb precisa de **rw** para `libusb_claim_interface`. O
-   `wineusb` falhava com `Access denied (insufficient permissions)` e descartava a tela em
-   silêncio. Corrigido por `udev/70-vocore.rules` (PID `1004` exato — `c872` é também o VID
-   da Cube Controls). Depois disso o trace `WINEDEBUG=+wineusb` mostra
-   `add_usb_device ... vendor c872, product 1004` e o nó PnP aparece:
-   `Enum\USB\VID_C872&PID_1004\...`, com `CompatibleIDs = USB\Class_ff...`.
-
-2. **Nenhum driver ligado ao nó — SEM SAÍDA DENTRO DO WINE ATUAL.** O nó nasce com
-   `ClassGUID={00000000-...}` e **sem valor `Service`**, e **nenhuma** interface de device é
-   registrada (medido: `DeviceClasses` não tem `{A5DCBF10-...}` GUID_DEVINTERFACE_USB_DEVICE
-   nem `{88BAE032-...}` GUID_DEVINTERFACE_WINUSB, em prefixo do SimHub **e** em prefixo
-   limpo recém-criado). A libusb que o SimHub carrega classifica o device **lendo qual driver
-   está ligado** — as mensagens estão no próprio binário: `The following device has no
-   driver: '%s'` e `unsupported API call for '%s' (unrecognized device driver)`. Sem driver e
-   sem interface, o device nunca entra na lista — e mesmo que o nó fosse consertado à mão, a
-   `winusb.dll` que atenderia as chamadas é stub (ver correção acima).
-
-   O prefixo tem só `wineusb.inf`, que instala o **bus driver** em `root\wineusb`; o Wine traz
-   `wineusb.sys` + `winusb.dll` user-mode, mas **nenhum `winusb.sys`** function driver. O
-   estado é o mesmo de um device no Windows *antes* de o instalador ligar o WinUSB nele.
-
-⚠️ Este bloqueio é **independente** do de topologia USB acima. O da topologia decide *a qual
-volante* uma tela pertence (`HasParentHub`); este decide se **alguma** tela chega a ser
-enumerada. A entrada genérica "Generic Vocore Screen" do catálogo esbarra neste, não naquele.
-Atacar a topologia sem resolver este não produz nada.
-
-### O caminho nativo viável — ponte libusb ✅ EXECUTADO em 2026-08-18
-
-Estava arquivado como "caro". **Não era.** As medições que sustentavam a ideia estavam
-certas, e o obstáculo que a arquivava estava errado (ver a correção do WoW64 abaixo):
-
-- `SimHub.LibUsbNative.dll` faz P/Invoke de exatamente **32 funções** da `libusb-1.0.dll`,
-  **todas da API síncrona** — sem callbacks, sem transferências assíncronas, sem hotplug.
-  Uma DLL winelib que repasse essas 32 chamadas à `libusb-1.0.so` do host substitui o
-  backend Windows inteiro (SetupAPI, hubs, WinUSB — tudo dispensado).
-- A lista inclui `libusb_get_parent`, `libusb_get_port_numbers`, `libusb_get_bus_number`:
-  **a topologia que falta no PnP do Wine, o SimHub pede à própria libusb** — e a árvore USB
-  real do Linux a tem. A ponte resolveria enumeração E identificação de uma vez.
-- ⚠️ **CORREÇÃO (2026-08-18): o obstáculo do WoW64 não existia.** Este arquivo dizia que a
-  ponte esbarrava em o Wine ser WoW64 novo (sem `i386-unix`) e o serviço VOCORE rodar no
-  `SimHub.SubProcess.X86.exe` 32-bit. **Isso só vale para winelib** (DLL PE com metade unix
-  `.so`). Uma DLL **PE pura** que converse com um helper por socket carrega normalmente no
-  processo 32-bit — medido: `ATTACH pid=556 exe=SimHub.SubProcess.X86.exe`. Não foi preciso
-  patch de IL nenhum no `RemoteClassProxy`3.CreateProcess`; a investigação do seletor X86/X64
-  virou irrelevante.
-- Convenção de chamada, medida no binário original com `objdump`: **31 funções `stdcall`**
-  (`libusb_init` → `ret $0x4`, `libusb_bulk_transfer` → `ret $0x18`, …) **+
-  `libusb_set_option` `cdecl`** (varargs). Exports **não decorados** — daí o `.def` +
-  `-Wl,--kill-at`. Conferir os 32 tamanhos de pilha antes de rodar evita um crash mudo.
-- Marshaling: **não há caso difícil.** A única struct de conteúdo é
-  `libusb_device_descriptor`, só escalares (18 bytes, idêntica em 32 e 64 bits).
-  `libusb_get_config_descriptor` — a que teria ponteiros aninhados — **não é usada**.
-
-### Decisão de 2026-08-16: tela via DRM nativo (fora do SimHub) — ⚠️ SUPERADA em 2026-08-18
-
-⚠️ Mantido como registro e como **fallback**. Com a ponte libusb funcionando, o `mpro_drm`
-não é necessário para usar a tela **no SimHub**; ele continua sendo a única forma de usar a
-tela **fora** dele. ⚠️ Os dois não convivem: com o módulo carregado, o kernel reivindica a
-interface e a ponte para de enxergar o device.
-
-O usuário pesquisou a comunidade e fechou: para a tela, o caminho é o **driver DRM
-`mpro_drm`** (Vonger, o criador da VoCore) + um renderizador nativo (SimMonitor/monocoque).
-As issues `vocore2#56` e `#21` confirmam por eliminação: são sobre o **fbusb**, o driver
-antigo de framebuffer, quebrado em kernels modernos (`mmap` → `ENODEV` no 6.10) — o
-`mpro_drm` é o sucessor.
-
-- Clone com patch e módulo compilado: **`~/apps/mpro_drm`** (fora deste repo — código de
-  terceiro). `linux-7.1-api.patch` adapta o código (que é para kernel 6.12) à API DRM
-  atual: `drm_fb_xrgb8888_to_rgb565` sem o `bool` final, `#include <drm/drm_print.h>`,
-  campo `.date` removido, `drm_client_setup()` + `DRM_FBDEV_SHMEM_DRIVER_OPS` no lugar de
-  `drm_fbdev_ttm_setup()`. ⚠️ Kernel CachyOS é clang/LTO: compile com **`make LLVM=1`**.
-- O driver casa `USB_DEVICE(0xc872, 0x1004)` e tem touch + backlight. Com `fbdev`
-  emulado, aparece também um `/dev/fbN`.
-- ⚠️ Com o módulo carregado, o kernel reivindica a interface e o caminho USB do SimHub
-  (wineusb/libusb) morre — os dois não convivem ao mesmo tempo. `rmmod mpro` desfaz.
-- No SimHub, desabilitar o device "Generic Vocore Screen" para parar o ciclo de
-  start/close do subprocesso VOCORE a cada 2 s.
+Continua sendo a única forma de usar a tela **fora** do SimHub — dentro dele, a ponte substituiu
+esse caminho. ⚠️ **Os dois não convivem**: com o módulo carregado o kernel reivindica a interface
+e a ponte para de enxergar o device. `rmmod mpro` desfaz.
 
 ## O hardware desta bancada
 
@@ -662,136 +628,50 @@ uma collection Joystick **vazia** (nenhum botão, nenhum eixo — é um dash, n�
 Um HYP-R ou F499, que têm botões de verdade, provavelmente têm descriptor como o dos MCP —
 **meça com `hidenum` e com `ildump.py` no manager do modelo antes de concluir**.
 
-## GTB Pro e o atalho de menu do Wine — 2026-08-19
+## Confirmações de campo — a receita 1 generaliza
 
-LEDs do GTB Pro (`0483:cb11`) conectaram na hora de plugar, mesmo padrão do FGT/RALLY —
-quarta confirmação. **A tela não conectou**, mas por um motivo já catalogado e alheio ao
-GTB Pro: o usuário abriu o SimHub pelo item de menu do CachyOS, que é o atalho que o
-`winemenubuilder` do Wine gera sozinho em `wine/Programs/SimHub/SimHub.desktop` — ele chama
-`lsu-launch-wrapper` direto, **sem** subir o helper da ponte libusb primeiro. Sem o helper de
-pé, a `libusb-1.0.dll` da ponte devolve erro na primeira chamada e a tela nunca aparece —
-comportamento já documentado (seção "Telas VoCore"), não um caso novo.
+FGT, RALLY, GTB Pro (LEDs) e Cube Controls AMG foram plugados e testados separadamente em
+2026-08-19. Juntos mostram que a receita 1 cobre device novo **sem passo específico** quando
+três checagens batem — o teste a aplicar antes de plugar qualquer device ainda não testado:
 
-⚠️ **Por que não dá para editar aquele `.desktop` direto**: o Wine o recria sempre que o
-prefixo reindexa o Start Menu (reinstall, update, às vezes só abrir o `winecfg`). É o mesmo
-problema que o projeto irmão `conspit-linux-configurator` já tinha resolvido para o
-ConspitLink — a correção que fica é um atalho **fora** da árvore que o Wine gerencia.
+1. a regra udev cobre o VID:PID (`70-pokornyi.rules` casa `cb??`; `70-cubecontrols.rules`
+   casa `c872:20??`);
+2. o PID está no `CATALOGO` do instalador, que gera o `EnableHidraw` — `install registry
+   --apply` escreve o catálogo **inteiro** de uma vez, não device a device, então um PID pode
+   já estar coberto antes mesmo de alguém pensar no device (caso do RALLY, `cb12`, coberto
+   desde a primeira vez que o comando rodou);
+3. `usagePage`/`usage` do manager batem com a collection que o Wine expõe (`ildump.py` no
+   manager + `hidenum` no hardware) — quando **não** batem, o resultado é o muro da PDU5, sem
+   uma linha de log.
 
-Adicionado `simhub-devices install shortcut`: lê o `Icon=` do atalho do Wine (evita precisar
-extrair o ícone de novo), e escreve
-`~/.local/share/applications/simhub-devices-linux-run-simhub.desktop` com `Exec=run-simhub`.
-Os dois atalhos convivem com o mesmo `Name=SimHub` — o do Wine continua existindo e
-reaparecendo, só que agora há um alternativo correto ao lado. Não tentei suprimir o do Wine
-(precisaria de um `Hidden=true` casando o Desktop ID exato dele,
-`wine-Programs-SimHub-SimHub.desktop`, e voltaria a cada regeneração de qualquer forma).
+| device | resultado | observação |
+|---|---|---|
+| FGT / RALLY | ✅ zero passo novo | só plugar e reabrir — as três checagens já estavam cobertas pelo catálogo |
+| GTB Pro (LEDs) | ✅ zero passo novo | mesmo padrão; a tela só conectou depois de reabrir pelo atalho novo (ver "Telas VoCore") |
+| Cube Controls AMG (`c872:200b`) | ✅ corrigido | faltavam as checagens 1 e 2: nenhuma regra udev cobria `c872:20??` (criada `70-cubecontrols.rules`) e o `CATALOGO` só tinha `200c` cadastrado (acrescentados `2007/2008/200a/200b/200c/200d/2010`) |
 
-**Confirmado**: reaberto pelo atalho novo (`install shortcut`), a tela do GTB Pro conectou
-junto com os LEDs. Fecha o ciclo: o bloqueio nunca foi do device, foi só o caminho que abria
-o SimHub sem subir o helper primeiro.
+⚠️ **O descriptor da AMG (66 bytes, medido em `/sys/bus/usb/devices/*/report_descriptor` —
+leitura raiz, não exige udev nem Wine) confirma o padrão dos MCP Pokornyi, não o da PDU5**: o
+canal vendor é só um Report ID diferente (`0xFF00` OUT / `0xFF01` FEATURE) dentro da mesma TLC
+Joystick, nunca uma collection separada. Só existe um PDO possível, e o IL de
+`CubeControlsAC190LedsManager.GetDriver()` nem passa `usagePage` separado (diferente da
+assinatura do `PokornyiDriver`) — não há descasamento possível, então nenhum patch de IL nem
+NGen entram aqui. Outro fabricante, outro VID, mesma conclusão da receita 1 pura.
 
-## Pokornyi RALLY — a confirmação mais barata das três
+⚠️ Falta testar `c872:200c` (`CubeControlsAMGLedsManager`) — mesmo driver, manager irmão, mas
+o descriptor dela pode diferir do `200b` (inferência de padrão, não medição).
 
-Validado em 2026-08-19, no mesmo dia da AMG, e mais rápido de fechar: **nenhum passo
-novo foi necessário**, nem sequer para diagnosticar. `0483:cb12` já estava no `CATALOGO`
-desde o início (junto com todos os outros PIDs Pokornyi do catálogo), e `install registry
---apply` escreve **todo o `CATALOGO` de uma vez**, não device a device — então o RALLY já
-tinha entrada no registro desde a primeira vez que o comando rodou, muito antes de ele ser
-plugado. ⚠️ **Desde 2026-08-20 a lista gravada é a UNIÃO do `CATALOGO` com o que já estava
-no prefixo**, e não mais uma substituição: o valor é compartilhado, e sobrescrevê-lo apagava
-em silêncio as entradas `3514:*` que o projeto irmão grava para os pedais Conspit. A
-cobertura automática por faixa de PID continua igual; o que mudou é não estragar o vizinho. A regra `udev/70-pokornyi.rules` (`cb??`)
-também já cobria. Bastou plugar e reabrir o SimHub.
+## O que falta
 
-É a terceira confirmação de que a receita generaliza (depois do FGT e da AMG), e a mais
-informativa sobre **como** ela generaliza: a cobertura não é "por device testado", é "por
-faixa de PID cadastrada" — um device pode funcionar antes mesmo de alguém pensar nele.
-
-## Cube Controls AMG — validada em 2026-08-19, e a lacuna era simples
-
-O usuário plugou a **Cube Controls AMG** e a aba Devices não conectou. A `lsusb` mostrou
-`c872:200b`, que no catálogo do SimHub é servido pelo `CubeControlsAC190LedsManager` — e não
-pelo `CubeControlsAMGLedsManager`, que aponta para `c872:200c`.
-
-⚠️ **Isso NÃO significa que o volante "não é uma AMG".** Foi essa a leitura inicial, e ela
-está errada: **AC190 é o nome do projeto do volante que a Cube Controls vende como AMG**. O
-`200c`, cujo manager leva o nome AMG no catálogo, é provavelmente uma variante nova ainda não
-lançada. Por isso a nomenclatura deste repo é **"Cube Controls AMG"** em todo lugar, com o PID
-desempatando quando precisar (ver a tabela na receita 1). O device confirmado com hardware é o
-`200b`; o `200c` segue não testado.
-
-⚠️ **Por que ficou preso em `Searching device...` sem log nenhum: o device era novo neste
-projeto, e faltavam exatamente os dois passos da receita 1** — não é o muro da PDU5.
-
-1. **Sem regra udev.** `/dev/hidraw24` (o nó da AMG) saía `crw------- root root`. Nenhuma
-   regra deste repo cobria `c872:20??`: a `70-vocore.rules` casa só o PID `1004` (subsystem
-   `usb`, não `hidraw`), e não havia regra nenhuma para os volantes Cube Controls. Criado
-   `udev/70-cubecontrols.rules`, casando `idProduct=="20??"` — cobre toda a faixa conhecida
-   (F-PRO `2007`, GT-PRO V2 `200A`, AMG `200B`, AMG-`200C`, Astra `2010`) sem tocar no
-   `1004` da tela, que não bate no padrão.
-2. **Sem entrada no `EnableHidraw`.** O `CATALOGO` do `tools/simhub-devices` só tinha
-   `c872:200c` cadastrado; nada gerava a linha `c872:200b` (a AMG real) na lista. Acrescentados os
-   cinco PIDs da faixa Cube Controls ao `CATALOGO`.
-
-**Medido o report descriptor da AMG** (66 bytes, via
-`/sys/bus/usb/devices/1-3:1.0/*/report_descriptor` — leitura raiz não exige udev nem Wine):
-
-```
-05 01 09 04 a1 01                 Generic Desktop / Joystick   <- UMA collection so'
-  85 01 09 01 a1 00 ... c0        Report ID 1: eixos Z/Rx (Pointer, physical)
-  05 09 19 01 29 40 ... 81 02     Button 1..64
-  85 03 06 00 ff 09 01 ... 91 02  Report ID 3: vendor 0xFF00, 19 bytes (OUT — os LEDs)
-  85 02 06 01 ff 09 01 ... b1 02  Report ID 2: vendor 0xFF01, 19 bytes (FEATURE)
-c0
-```
-
-**Mesmo padrão dos MCP Pokornyi, não o da PDU5**: o canal vendor não é uma collection
-aninhada nem irmã — é só um **Report ID diferente dentro da mesma** TLC Joystick. Só existe
-um PDO possível, e é ele que o Wine expõe. Medido no IL:
-`CubeControlsAC190LedsManager.GetDriver()` chama `CubeControlsLedsDriverV2::GetDevice(pid=
-0x200B, usage=4, vid=0xC872)` — **sem** `usagePage` separado no argumento (diferente da
-assinatura do `PokornyiDriver`); a collection pedida é a única que existe. Não há o
-descasamento que trava a PDU5, e portanto **nenhum patch de IL nem NGen entram aqui** — a
-receita 1 pura resolve.
-
-**Confirmado com hardware em 2026-08-19.** `install udev --apply` + `install registry --apply`
-+ `wineserver -k`: a AMG passou a aparecer normalmente na aba Devices, sem precisar de
-patch de IL nem de mexer no NGen — a receita 1 pura bastou.
-
-⚠️ **Continua faltando testar a variante `c872:200c`.** Mesmo driver
-(`CubeControlsLedsDriverV2`), manager irmão — a expectativa é que funcione igual, mas isso
-é inferência do padrão, não medição; o descriptor dela pode diferir do `200b`.
-
-## Ordem de trabalho sugerida
-
-Passos 1–3 **feitos e validados** em 2026-08-16 (os três MCP). O que sobra:
-
-1. ~~Comece por um MCP~~ ✅ — os três conectam, LEDs controláveis pelo SimHub.
-2. ~~`lsusb` → confirmar VID/PID~~ ✅ — bateram todos.
-3. ~~Aplicar a receita 1 e verificar com `hidenum`~~ ✅ — **e o passo decisivo foi o udev**,
-   não o registro (ver receita 1).
-4. ~~**FGT**~~ ✅ **2026-08-19 — e é o resultado mais informativo até agora.** O usuário
-   plugou o volante e reabriu o SimHub: funcionou, **sem nenhum passo específico**. Não foi
-   sorte, e o porquê é verificável antes de plugar o próximo: (a) a regra udev casa `cb??`,
-   então o PID novo já tinha ACL; (b) o `EnableHidraw` é montado a partir do `CATALOGO` do
-   instalador, que já listava `cb15`; (c) `PokornyiFGTManager` pede `usagePage 1 / usage 4`
-   (medido no IL), a collection que o Wine expõe. **Essas três checagens são o teste a
-   aplicar em qualquer device novo** — quando a (c) falha, o resultado é a PDU5.
-   ✅ A **Cube Controls AMG** (`c872:200b`) fechou esse teste em 2026-08-19 — outro
-   fabricante, outro VID, e mesmo assim receita 1 pura. Falta só a variante `c872:200c`
-   (`CubeControlsAMGLedsManager`), que é a mesma receita com outro PID.
-5. ~~Um volante com tela~~ HYP-R ✅ e GTB Pro ✅ confirmam o padrão: `usagePage 1/4`, LEDs
-   conectam sem patch. **Falta o F499** — antes de plugar, `ildump.py` no
-   `PokornyiF499Manager` para o mesmo check; se vier `0xFF/1`, é o muro da PDU5.
-6. **PDU5 (LEDs)**: sem correção por registro/udev. Depende de o Wine promover a collection
-   vendor aninhada a PDO próprio — candidato a issue/patch no Wine, com um caso de teste
-   pequeno e claro (descriptor de 35 bytes, na receita 1).
-7. ~~**Telas VoCore**~~ ✅ **RESOLVIDO em 2026-08-18** pela ponte libusb
-   (`~/apps/wine-libusb-bridge`), não pelo DRM nativo. ~~Confirmar o touch~~ ✅. ~~Subir o
-   helper antes do SimHub~~ ✅ resolvido pelo launcher `run-simhub` (não unit systemd — ver
-   "Projetos irmãos"), e desde 2026-08-19 também por `simhub-devices install shortcut`, que
-   cria um atalho de menu fora da árvore do Wine apontando pro `run-simhub` — o atalho que o
-   Wine gera sozinho (`winemenubuilder`) abre direto, sem a ponte, e some/reaparece a cada
-   reinstall/update. Falta só reinstalar a DLL da ponte após cada update do SimHub.
+- **PDU5 (LEDs, registro):** sem correção por registro/udev — depende de o Wine promover a
+  collection vendor aninhada a PDO próprio; candidato a issue/patch no Wine (descriptor de 35
+  bytes, receita 1).
+- **F499 / PDU7:** falta plugar. Antes, `ildump.py` no manager (`PokornyiF499Manager` /
+  `PokornyiPEPDU7Manager`) — se vier `usagePage 0xFF`, é o muro da PDU5; se vier `1/4`, deve
+  conectar direto como o HYP-R/GTB Pro.
+- **Cube Controls `200c`:** falta plugar; mesma receita do `200b`, descriptor não medido.
+- **Cube Controls Phoenix:** PID não é constante no IL (`get_Pid()`) — precisa `lsusb` com o
+  hardware na mão antes de cadastrar no `CATALOGO`.
 
 ## Code review de 2026-08-20 — o que mudou de comportamento
 
@@ -825,24 +705,9 @@ VID `0x483`, exatamente como registrado aqui. Mas a ferramenta não era confiáv
 
 ### Na ponte (`wine-libusb-bridge`)
 
-- **Token agora carrega tipo, e o tipo é conferido.** Um `FN_CLOSE` com token de device
-  executava `libusb_close()` sobre um `libusb_device*`. Não era hipotético: o watchdog libera
-  a tabela após 5 s sem conexão, e uma thread .NET que sobreviva a isso reconecta com tokens
-  da geração anterior. Por isso, também: **token nunca mais é reciclado**.
-- **Todo comprimento vindo do cliente tem teto** (`BRIDGE_MAX_PAYLOAD`). Um request de 40
-  bytes pedindo 2 GB derrubava o helper — e com ele a tela.
-- **`control_transfer` OUT só envia o que chegou.** Enviava `wLength` bytes mesmo com menos
-  dados recebidos, colocando no barramento o resto do buffer reciclado da thread.
-- **O helper confere o UID do outro lado** (via `/proc/net/tcp`; TCP não tem `SO_PEERCRED`).
-  Loopback é compartilhado por todos os usuários da máquina. `--allow-any-uid` desliga.
-- **Transferência OUT não é mais copiada** para o buffer de saída antes de ir para a libusb:
-  eram ~819 KB por quadro, ~49 MB/s de cópia inútil a 60 fps.
-- **`make check-abi`** compara os símbolos decorados do binário (`_libusb_init@4` — o `@N`
-  *é* o tamanho de pilha stdcall) contra `abi.expected`. Errar a convenção de chamada é o
-  único erro que não dá mensagem: o processo morre sem explicação.
-- ⚠️ **O formato de fio é congelado de propósito.** DLL e helper de versões diferentes
-  continuam conversando — verificado: os 32 exports e as decorações são idênticos antes e
-  depois da revisão.
+A revisão da ponte (tipagem de token, teto de payload, `control_transfer` OUT, checagem de UID,
+`make check-abi`, formato de fio congelado) está documentada **no README do repo dela** — aqui é
+análise, lá é produto. Não replicado para não sair de sincronia.
 
 ## Segurança
 
@@ -854,19 +719,6 @@ porta que possa ser a base.
 
 Sondas de diagnóstico devem ser **somente leitura** por padrão. Escrever no registro do
 prefixo é reversível (backup: `pfx/system.reg.bak-*`); escrever na firmware não é.
-
-## Pegadinhas já pagas
-
-1. **Entradas PnP obsoletas travam o device em silêncio.** Um `Enum\HID\VID_xxxx&PID_xxxx*`
-   remanescente faz o `col01` ser registrado mas nunca ficar "present" — e o driver recebe
-   `null`, com `NullReferenceException` a cada 2 s no log. Correção: apagar as entradas e
-   deixar o Wine recriar. Foi o que destravou os pedais CPP.LITE.
-2. **`ConspitManager.GetDriver()` é compartilhado** entre haptics e LEDs — um device parcial
-   derruba os dois caminhos, e o sintoma aparece longe da causa.
-3. **Erros `FindGamePath` / `CompatibilityStoreHelper` no log são de outra natureza** (achar
-   jogos instalados, Steam nativo). Não são pista de problema de device — ignore ao
-   diagnosticar Devices.
-4. **Não confie em `strings` para achar nomes em app .NET/Qt** — UTF-16. Use `strings -el`.
 
 ## Escopo
 
