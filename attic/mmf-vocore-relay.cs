@@ -1,8 +1,12 @@
 // Relay: device "Special : Generic MMF rendering V2" do SimHub -> /dev/shm.
 //
+// ⚠️ SUPERADO em 2026-08-18 pela ponte libusb -- ver attic/README.md. Fica como
+// fallback para usar a tela FORA do SimHub. Os offsets abaixo sao de RUNTIME e
+// valem para o SimHub 9.11.22; re-meça antes de confiar neles.
+//
 // Roda DENTRO do prefixo Wine (x64). Abre o MMF "SimHubDashRenderv2" que o
 // device da aba Devices cria/atende e repassa os frames para um arquivo em
-// Z:\dev\shm (= /dev/shm do Linux), onde o mpro-dash-daemon.py os entrega ao
+// Z:\dev\shm (= /dev/shm do Linux), onde o attic/mpro-dash-daemon.py os entrega ao
 // framebuffer da tela VoCore (driver mpro_drm). Touch/acoes fazem o caminho
 // inverso.
 //
@@ -19,9 +23,9 @@
 // ⚠️ OFFSETS DE RUNTIME, nao de marshaling: o SimHub acessa o MMF por
 // ponteiro cru (bool = 1 byte). Marshal.OffsetOf da' valores ERRADOS (bool
 // vira 4 bytes; a diferenca bate com mmfSize: 16589964 vs 16589949 = 5 bools
-// x 3 bytes). Medidos com DynamicMethod+ldflda contra a DLL do SimHub
-// 9.11.22 (tecnica em docs; probe offsets3.cs). Se o SimHub atualizar,
-// re-rodar o probe.
+// x 3 bytes). Medidos com DynamicMethod+ldflda contra a DLL do SimHub 9.11.22,
+// por uma sonda descartavel que NAO esta neste repo. Se o SimHub atualizar,
+// refaca a medicao (a tecnica das sondas por reflexao esta no CLAUDE.md).
 //
 // Compilar (dentro do prefixo, tecnica do CLAUDE.md):
 //   wine csc.exe /nologo /platform:x64 /unsafe /out:mmf-vocore-relay.exe mmf-vocore-relay.cs

@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Daemon: /dev/shm/simhub-mpro -> framebuffer da tela VoCore (mpro_drm).
 
-A outra ponta e' o tools/mmf-vocore-relay.cs, rodando dentro do prefixo do
+⚠️ SUPERADO em 2026-08-18 pela ponte libusb -- ver attic/README.md. Fica como
+fallback para usar a tela FORA do SimHub.
+
+A outra ponta e' o attic/mmf-vocore-relay.cs, rodando dentro do prefixo do
 SimHub: ele conecta o device "Special : Generic MMF rendering V2" da aba
 Devices e copia cada frame para o bridge em /dev/shm. Este daemon:
 
@@ -19,11 +22,10 @@ direta quando o fb e' 32bpp; conversao para RGB565 se for 16bpp (numpy).
 configuracoes de tela do KDE antes de rodar (senao o KWin e o daemon brigam
 pelo mesmo CRTC e o resultado e' indefinido).
 
-Uso:  python3 tools/mpro-dash-daemon.py [--fb /dev/fbN] [--test]
+Uso:  python3 attic/mpro-dash-daemon.py [--fb /dev/fbN] [--test]
       --test: escreve um degrade e sai (valida o caminho ate' a tela sem SimHub)
 """
 import argparse
-import ctypes
 import fcntl
 import mmap
 import os

@@ -56,16 +56,28 @@ Validado com o hardware conectado em **CachyOS** (kernel 7.1, Wine 11.15), entre
 | Pokornyi GTB Pro | `0483:cb11` | LEDs (HID) + tela | ✅ **validado com hardware** |
 | Pokornyi FGT | `0483:cb15` | LEDs (HID) | ✅ **validado** — plugar e reabrir o SimHub bastou |
 | Pokornyi RALLY | `0483:cb12` | LEDs (HID) | ✅ **validado** — idem, zero passo novo |
-| Cube Controls AMG (AC190) | `c872:200b` | LEDs + botões (HID) | ✅ **validado com hardware** |
+| Cube Controls AMG | `c872:200b` | LEDs + botões (HID) | ✅ **validado com hardware** |
 | Tela VoCore | `c872:1004` | dash + **toque** (libusb) | ✅ **validado** — 854×480, via a ponte |
 
 O **FGT** é a evidência de que a receita generaliza: nunca tinha sido ligado nesta bancada,
 e bastou plugar e reabrir o SimHub — sem nenhuma configuração específica para ele. O porquê
 está em [CLAUDE.md](CLAUDE.md).
 
+> **Sobre a Cube Controls AMG:** o volante que todo mundo chama de **AMG** é o projeto
+> **AC190**, e é ele que está validado aqui (`c872:200b`). O catálogo do SimHub também traz um
+> `CubeControlsAMGLedsManager` apontando para *outro* PID (`c872:200c`) — possivelmente uma AMG
+> nova que ainda não foi lançada. Os dois são cobertos pela mesma regra udev e pela mesma lista
+> de registro, então a distinção não muda nada na prática: **quem desempata é o PID, nunca o
+> nome comercial.**
+>
+> ⚠️ Uma diferença medida que vale saber: o manager do `200c` pede HID **`usage 8`**, enquanto
+> todos os outros Cube Controls pedem `4`. Se aquele device expuser uma collection Joystick
+> (`usage 4`), ele bate exatamente no muro da PDU5 — `Searching device ...` sem nada no log.
+> Ver o passo [5](#passo-5--leds-da-pdu5-pdu7-e-led-brows).
+
 E o que a receita **deveria** cobrir, sem ninguém ter testado: os demais Pokornyi (PDU7, LED
 Brows, LMPH, F499, HYP-R PRO, LMP PRO V2, GTE PRO V3), o restante da Cube Controls
-(F-PRO, GT-PRO V2, Astra) e os demais volantes Conspit (300GT, MAX 01, 310 APEX,
+(F-PRO, GT-PRO V2, CSX3, GTX2, Astra, e a variante `200c` da AMG) e os demais volantes Conspit (300GT, MAX 01, 310 APEX,
 290 GP, PW1, CSD). São **mais de 200 devices** no catálogo do SimHub; os três caminhos abaixo
 cobrem a grande maioria.
 
@@ -545,10 +557,12 @@ saída do `hidenum`**, as **constantes do manager** e o que apareceu no log. É 
 para dizer se a receita generaliza ou se aquele modelo tem algo próprio. Abra uma issue com
 esses três.
 
-> ⚠️ **Apague o número de série antes de colar saída de log numa issue.** O `install serial`
-> mostra o **serial USB** do device, e serial não é só identificador: vários fabricantes o usam
-> como prova de titularidade para acionar garantia. Se alguém abrir um chamado com o **seu**,
-> quem pode ficar sem cobertura é você. Troque por `<SERIAL>`.
+> ⚠️ **Os seriais agora saem mascarados por padrão — confira mesmo assim.** Serial não é só
+> identificador: vários fabricantes o usam como prova de titularidade para acionar garantia. Se
+> alguém abrir um chamado com o **seu**, quem pode ficar sem cobertura é você. Por isso o
+> `hidenum` imprime `<INSTANCIA>` no lugar do instance ID (`--serial` devolve o valor real, para
+> uso local) e o dry-run do `install serial` ecoa `<SERIAL>` no lugar do serial USB. O que vier
+> de outra fonte, troque à mão.
 >
 > O `doctor` também imprime caminhos absolutos com o seu nome de usuário — bem menos grave, mas
 > troque por `~/` se quiser. **VID/PID e modelo podem ficar**: são públicos do fabricante e são
@@ -604,10 +618,13 @@ device — ignore ao diagnosticar a aba Devices.
 | `tools/pdu5-leds-patch.py` | patch do `usagePage` da PDU5 (`--check` / `--apply` / `--revert`) |
 | `tools/ildump.py` | desmonta o IL de um tipo — chamadas e constantes sobrevivem à ofuscação |
 | `tools/ilgrep.py` | acha quem chama um método |
+| `tools/ilcommon.py` | leitura de metadados .NET compartilhada pelas três acima |
 | `tools/hidenum.c` | enumera HID **de dentro do prefixo**: o que o SimHub enxerga |
 | `tools/nameprobe.c` | mostra qual API do SetupAPI responde o quê (usado no passo 3) |
 | `udev/70-pokornyi.rules` | ACL de `/dev/hidraw*` para Pokornyi (`0483:cb??`) |
+| `udev/70-cubecontrols.rules` | ACL de `/dev/hidraw*` para Cube Controls (`c872:20??`) |
 | `udev/70-vocore.rules` | ACL de escrita no nó USB da tela VoCore (`c872:1004`) |
+| `attic/` | o caminho superado (`mpro_drm` + MMF) — fallback, fora da instalação |
 
 As duas sondas em C se compilam com mingw:
 

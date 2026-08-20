@@ -203,7 +203,48 @@ ao plugar — PID pode variar por revisão de firmware)*:
 | | | | `CB42` | MCP IgnitionBox |
 
 **Cube Controls — VID `C872`** (PIDs em `20xx`): F-PRO `2007`, GT-PRO V2 `200A`,
-AC190 `200B`, **AMG `200C`**, Astra `2010`.
+AMG/AC190 `200B` (**validado**), AMG variante `200C`, Astra `2010`.
+
+⚠️ **Nomenclatura da Cube Controls, fixada em 2026-08-20.** O volante é vendido e conhecido
+como **AMG**; `AC190` é o nome do *projeto*. Chame de **"Cube Controls AMG"** em todo lugar —
+99% dos usuários não reconhecem "AC190", e um README que só diz AC190 faz a pessoa concluir
+que o volante dela não está coberto. O que existem são **dois PIDs**, com managers distintos
+sobre o mesmo `CubeControlsLedsDriverV2`:
+
+| PID | manager | usage pedido | estado |
+|---|---|:---:|---|
+| `200B` | `CubeControlsAC190LedsManager` | 4 | ✅ **é o volante da bancada**, o "AMG" que se compra hoje |
+| `200C` | `CubeControlsAMGLedsManager` | **8** | não testado — possivelmente uma AMG nova ainda não lançada |
+
+Quem desempata é o **PID**, nunca o nome comercial. As duas receitas (udev `20??` e a lista
+`EnableHidraw`) cobrem os dois, então na prática a distinção não muda nenhum passo.
+
+⚠️ **Mas o `200C` pede `usage 8`, e todos os outros Cube Controls pedem `4`** (medido no IL
+em 2026-08-20). `usage 8` na página Generic Desktop é *Multi-axis Controller*. Se o device
+físico expuser uma collection **Joystick** (`usage 4`), como o AMG/AC190 expõe, o
+`MatchUsage` nunca casa — e o sintoma é o da PDU5: `Searching device ...` **sem uma única
+linha no log**. Meça com o `hidenum` antes de concluir que o volante está quebrado; se for o
+caso, a correção é um patch de IL do mesmo tipo do `pdu5-leds-patch.py`, trocando `8` por `4`.
+Isso reforça a leitura de que o `200C` é *outro* aparelho, não a AMG que se compra hoje.
+
+**Catálogo completo dos managers Cube Controls** (medido no IL em 2026-08-20, com o
+`ildump.py` corrigido — todos sobre `CubeControlsLedsDriverV2`):
+
+| manager | VID:PID | usage | no `CATALOGO` |
+|---|---|:---:|---|
+| `CubeControlsFPROLedsManager` | `c872:2007` | 4 | ✅ |
+| `CubeControlsCSX3LedsManager` | `c872:2008` | 4 | ✅ (acrescentado em 2026-08-20) |
+| `CubeControlsGTPro2LedsManager` | `c872:200a` | 4 | ✅ |
+| `CubeControlsAC190LedsManager` | `c872:200b` | 4 | ✅ **validado** |
+| `CubeControlsAMGLedsManager` | `c872:200c` | **8** | ✅ |
+| `CubeControlsGTX2LedsManager` | `c872:200d` | 4 | ✅ (acrescentado em 2026-08-20) |
+| `CubeControlsAstraLedsManager` | `c872:2010` | 4 | ✅ |
+| `CubeControlsPhoenixLedsManager` | `c872:?` | 9 | ❌ — o PID vem de `get_Pid()`, **não é constante no IL** |
+
+⚠️ O Phoenix é o único que não dá para ler estaticamente: o manager chama
+`GetDevice(Mapper, get_Pid(), 9, 0xC872, 21)`, com o PID vindo de uma propriedade. Para
+cadastrá-lo é preciso `lsusb` com o hardware na mão. A regra udev `20??` provavelmente já o
+cobre; o `EnableHidraw` não.
 
 ⚠️ **`C872` é também o VID das telas VoCore** (PID `1004`). Um `EnableHidraw` com `C872:xxxx`
 atinge só o PID listado, mas tenha isso em mente ao diagnosticar: dois tipos de device
@@ -606,8 +647,8 @@ revisão de firmware.
 | tela da PDU5 | `c872:1004` | — | `BitmapDisplayDevice` via libusb | ✅ **conecta e mostra o dash** (receita 3: ponte libusb) — MPRO D500FPC931A-A, 854×480 |
 | Pokornyi FGT | `0483:cb15` | não | `PokornyiFGTManager` (HID) | ✅ **conecta** — plugar e reabrir bastou (2026-08-19) |
 | Pokornyi RALLY | `0483:cb12` | não | `PokornyiRallyManager` (HID) | ✅ **conecta** — plugar e reabrir bastou, zero passo novo (2026-08-19) |
-| Cube Controls AC190 | `c872:200b` | não | `CubeControlsAC190LedsManager` (HID) | ✅ **conecta** — receita 1 pura, sem usagePage errado (2026-08-19) |
-| Cube Controls AMG | `c872:200c` | não | `CubeControlsAMGLedsManager` (HID) | não testado — receita 1, mesmo driver do AC190 |
+| **Cube Controls AMG** (projeto AC190) | `c872:200b` | não | `CubeControlsAC190LedsManager` (HID) | ✅ **conecta** — receita 1 pura, sem usagePage errado (2026-08-19) |
+| Cube Controls AMG variante `200c` | `c872:200c` | não | `CubeControlsAMGLedsManager` (HID) | não testado — receita 1, mesmo driver |
 | Pokornyi HYP-R | `0483:cb10` | **sim** | composite: LEDs (HID) + tela | ✅ **LEDs e tela conectam** (2026-08-18) |
 | Pokornyi F499 | `0483:cb14` | **sim** | composite: LEDs (HID) + tela | não testado |
 | Pokornyi GTB Pro | `0483:cb11` | **sim** | composite: LEDs (HID) + tela | ✅ **LEDs e tela conectam** (2026-08-19) |
@@ -650,41 +691,48 @@ o SimHub sem subir o helper primeiro.
 
 ## Pokornyi RALLY — a confirmação mais barata das três
 
-Validado em 2026-08-19, no mesmo dia do AC190, e mais rápido de fechar: **nenhum passo
+Validado em 2026-08-19, no mesmo dia da AMG, e mais rápido de fechar: **nenhum passo
 novo foi necessário**, nem sequer para diagnosticar. `0483:cb12` já estava no `CATALOGO`
 desde o início (junto com todos os outros PIDs Pokornyi do catálogo), e `install registry
---apply` escreve a lista `EnableHidraw` **inteira** a partir do `CATALOGO`, não
-incrementalmente — então o RALLY já tinha entrada no registro desde a primeira vez que o
-comando rodou, muito antes de ele ser plugado. A regra `udev/70-pokornyi.rules` (`cb??`)
+--apply` escreve **todo o `CATALOGO` de uma vez**, não device a device — então o RALLY já
+tinha entrada no registro desde a primeira vez que o comando rodou, muito antes de ele ser
+plugado. ⚠️ **Desde 2026-08-20 a lista gravada é a UNIÃO do `CATALOGO` com o que já estava
+no prefixo**, e não mais uma substituição: o valor é compartilhado, e sobrescrevê-lo apagava
+em silêncio as entradas `3514:*` que o projeto irmão grava para os pedais Conspit. A
+cobertura automática por faixa de PID continua igual; o que mudou é não estragar o vizinho. A regra `udev/70-pokornyi.rules` (`cb??`)
 também já cobria. Bastou plugar e reabrir o SimHub.
 
-É a terceira confirmação de que a receita generaliza (depois do FGT e do AC190), e a mais
+É a terceira confirmação de que a receita generaliza (depois do FGT e da AMG), e a mais
 informativa sobre **como** ela generaliza: a cobertura não é "por device testado", é "por
 faixa de PID cadastrada" — um device pode funcionar antes mesmo de alguém pensar nele.
 
-## Cube Controls AC190 — validado em 2026-08-19, e a lacuna era simples
+## Cube Controls AMG — validada em 2026-08-19, e a lacuna era simples
 
-O usuário plugou o que chamava de "Cube Controls AMG" e a aba Devices não conectou. A
-`lsusb`/o descriptor USB do próprio device desmentiram o rótulo: é um **AC190**
-(`c872:200b`), não a AMG (`c872:200c`) — modelos vizinhos, o mesmo erro de que um HYP-R
-"parece" um F499 de longe. `CubeControlsAC190LedsManager` e `CubeControlsAMGLedsManager`
-são managers **distintos**, ambos sobre `CubeControlsLedsDriverV2`. **O device confirmado
-com hardware é o AC190** — a AMG segue não testada.
+O usuário plugou a **Cube Controls AMG** e a aba Devices não conectou. A `lsusb` mostrou
+`c872:200b`, que no catálogo do SimHub é servido pelo `CubeControlsAC190LedsManager` — e não
+pelo `CubeControlsAMGLedsManager`, que aponta para `c872:200c`.
+
+⚠️ **Isso NÃO significa que o volante "não é uma AMG".** Foi essa a leitura inicial, e ela
+está errada: **AC190 é o nome do projeto do volante que a Cube Controls vende como AMG**. O
+`200c`, cujo manager leva o nome AMG no catálogo, é provavelmente uma variante nova ainda não
+lançada. Por isso a nomenclatura deste repo é **"Cube Controls AMG"** em todo lugar, com o PID
+desempatando quando precisar (ver a tabela na receita 1). O device confirmado com hardware é o
+`200b`; o `200c` segue não testado.
 
 ⚠️ **Por que ficou preso em `Searching device...` sem log nenhum: o device era novo neste
 projeto, e faltavam exatamente os dois passos da receita 1** — não é o muro da PDU5.
 
-1. **Sem regra udev.** `/dev/hidraw24` (o nó do AC190) saía `crw------- root root`. Nenhuma
+1. **Sem regra udev.** `/dev/hidraw24` (o nó da AMG) saía `crw------- root root`. Nenhuma
    regra deste repo cobria `c872:20??`: a `70-vocore.rules` casa só o PID `1004` (subsystem
    `usb`, não `hidraw`), e não havia regra nenhuma para os volantes Cube Controls. Criado
    `udev/70-cubecontrols.rules`, casando `idProduct=="20??"` — cobre toda a faixa conhecida
-   (F-PRO `2007`, GT-PRO V2 `200A`, AC190 `200B`, AMG `200C`, Astra `2010`) sem tocar no
+   (F-PRO `2007`, GT-PRO V2 `200A`, AMG `200B`, AMG-`200C`, Astra `2010`) sem tocar no
    `1004` da tela, que não bate no padrão.
 2. **Sem entrada no `EnableHidraw`.** O `CATALOGO` do `tools/simhub-devices` só tinha
-   `c872:200c` (AMG) cadastrado; nada gerava a linha `c872:200b` na lista. Acrescentados os
+   `c872:200c` cadastrado; nada gerava a linha `c872:200b` (a AMG real) na lista. Acrescentados os
    cinco PIDs da faixa Cube Controls ao `CATALOGO`.
 
-**Medido o report descriptor do AC190** (66 bytes, via
+**Medido o report descriptor da AMG** (66 bytes, via
 `/sys/bus/usb/devices/1-3:1.0/*/report_descriptor` — leitura raiz não exige udev nem Wine):
 
 ```
@@ -706,12 +754,12 @@ descasamento que trava a PDU5, e portanto **nenhum patch de IL nem NGen entram a
 receita 1 pura resolve.
 
 **Confirmado com hardware em 2026-08-19.** `install udev --apply` + `install registry --apply`
-+ `wineserver -k`: o AC190 passou a aparecer normalmente na aba Devices, sem precisar de
++ `wineserver -k`: a AMG passou a aparecer normalmente na aba Devices, sem precisar de
 patch de IL nem de mexer no NGen — a receita 1 pura bastou.
 
-⚠️ **Continua faltando testar a AMG de verdade** (`c872:200c`). Mesmo driver
+⚠️ **Continua faltando testar a variante `c872:200c`.** Mesmo driver
 (`CubeControlsLedsDriverV2`), manager irmão — a expectativa é que funcione igual, mas isso
-é inferência do padrão, não medição; o descriptor da AMG pode diferir do AC190.
+é inferência do padrão, não medição; o descriptor dela pode diferir do `200b`.
 
 ## Ordem de trabalho sugerida
 
@@ -728,8 +776,9 @@ Passos 1–3 **feitos e validados** em 2026-08-16 (os três MCP). O que sobra:
    instalador, que já listava `cb15`; (c) `PokornyiFGTManager` pede `usagePage 1 / usage 4`
    (medido no IL), a collection que o Wine expõe. **Essas três checagens são o teste a
    aplicar em qualquer device novo** — quando a (c) falha, o resultado é a PDU5.
-   ⚠️ Falta a **AMG**: continua sendo o teste mais informativo que resta, por ser outro
-   fabricante (VID `c872`, manager `CubeControlsAMGLedsManager`).
+   ✅ A **Cube Controls AMG** (`c872:200b`) fechou esse teste em 2026-08-19 — outro
+   fabricante, outro VID, e mesmo assim receita 1 pura. Falta só a variante `c872:200c`
+   (`CubeControlsAMGLedsManager`), que é a mesma receita com outro PID.
 5. ~~Um volante com tela~~ HYP-R ✅ e GTB Pro ✅ confirmam o padrão: `usagePage 1/4`, LEDs
    conectam sem patch. **Falta o F499** — antes de plugar, `ildump.py` no
    `PokornyiF499Manager` para o mesmo check; se vier `0xFF/1`, é o muro da PDU5.
@@ -743,6 +792,57 @@ Passos 1–3 **feitos e validados** em 2026-08-16 (os três MCP). O que sobra:
    cria um atalho de menu fora da árvore do Wine apontando pro `run-simhub` — o atalho que o
    Wine gera sozinho (`winemenubuilder`) abre direto, sem a ponte, e some/reaparece a cada
    reinstall/update. Falta só reinstalar a DLL da ponte após cada update do SimHub.
+
+## Code review de 2026-08-20 — o que mudou de comportamento
+
+Revisão completa dos dois repos. A maior parte foi limpeza, mas **estes itens mudam
+comportamento** e quem for mexer aqui precisa saber, porque alguns "consertam" de volta
+sem querer:
+
+| o que era | o que é agora | por quê |
+|---|---|---|
+| `REPO = dirname(dirname(abspath(__file__)))` | `realpath` | o comando é usado pelo PATH, via symlink em `~/.local/bin`. Com `abspath`, `REPO` virava `~/.local` e **`install udev` morria com "nenhuma regra em ~/.local/udev"** — o passo 1 do README não funcionava do jeito documentado de instalar |
+| `--apply` no meio virava dry-run silencioso | funciona nas três posições | `argparse` copia o namespace do subparser sobre o do pai; sem `default=argparse.SUPPRESS`, o parser de terceiro nível reaplicava `apply2=False`. `install --apply bridge` não fazia nada e dizia DRY-RUN |
+| `EnableHidraw` era **substituído** | é a **união** com o que já existe | valor compartilhado do prefixo; ver a seção do RALLY |
+| `regedit`/patcher com returncode descartado | falha aborta com mensagem | falha silenciosa é o pecado que este projeto existe para não repetir |
+| `hidenum` imprimia o instance ID inteiro | imprime `<INSTANCIA>`; `--serial` mostra | o instance ID carrega o **serial do hardware**, e os READMEs pedem essa saída para colar em issue |
+| dry-run do `install serial` ecoava o serial USB | ecoa `<SERIAL>` | idem — o registro recebe o valor real, quem é mascarado é o eco na tela |
+| `run-simhub` dormia 5 s e já checava se o SimHub morreu | espera o processo **aparecer** (até 120 s) | em prefixo frio o app demorava mais que isso, o `pgrep` dava vazio na primeira volta e o trap **derrubava a ponte** — a tela não conectava, de forma intermitente |
+| `run-simhub` fixava `~/apps/wine-libusb-bridge` e a porta 47100 | mesma precedência do instalador (`$SIMHUB_PONTE` → `vendor/` → local) e `$LIBUSB_BRIDGE_PORT` | o instalador copiava a DLL do `vendor/` e o launcher subia o helper da cópia local: duas metades da ponte de versões diferentes |
+| `pdu5-leds-patch.py` procurava numa janela de 512 bytes | usa o **CodeSize do cabeçalho** do método, e recusa padrão ambíguo | a janela passava do fim de um método curto e podia casar no método seguinte — patch silencioso e no lugar errado. Escrita agora é atômica (`os.replace`) |
+| `tools/mmf-vocore-relay.cs` + `mpro-dash-daemon.py` em `tools/` | movidos para `attic/` com README próprio | caminho `mpro_drm`+MMF, superado pela ponte em 2026-08-18; não eram citados em lugar nenhum e ninguém saberia que estavam mortos |
+
+⚠️ **O decodificador de IL do `ildump.py` estava errado** — `blt.un.s` (0x37) classificado como
+desvio longo e `stloc.2/3` (0x0C/0x0D) tratados como se tivessem operando; e `leave`/`leave.s`
+não eram tratados. Medido na `SimHub.Plugins.dll`: **51,6% dos 35.295 métodos** decodificavam
+diferente, e em **777 deles apareciam constantes que não existem** no código. A tabela de
+operandos agora é completa e vive em `tools/ilcommon.py` (uma cópia, não três).
+
+✅ **As conclusões deste projeto NÃO foram afetadas** — medido por eliminação: nenhum
+`GetDriver` de manager Pokornyi/CubeControls/StandardProtocol está entre os 777. O
+`PokornyiPEPDU5Manager::GetDriver` continua lendo `0xCB01`, usagePage `1`, usage `4`,
+VID `0x483`, exatamente como registrado aqui. Mas a ferramenta não era confiável em geral.
+
+### Na ponte (`wine-libusb-bridge`)
+
+- **Token agora carrega tipo, e o tipo é conferido.** Um `FN_CLOSE` com token de device
+  executava `libusb_close()` sobre um `libusb_device*`. Não era hipotético: o watchdog libera
+  a tabela após 5 s sem conexão, e uma thread .NET que sobreviva a isso reconecta com tokens
+  da geração anterior. Por isso, também: **token nunca mais é reciclado**.
+- **Todo comprimento vindo do cliente tem teto** (`BRIDGE_MAX_PAYLOAD`). Um request de 40
+  bytes pedindo 2 GB derrubava o helper — e com ele a tela.
+- **`control_transfer` OUT só envia o que chegou.** Enviava `wLength` bytes mesmo com menos
+  dados recebidos, colocando no barramento o resto do buffer reciclado da thread.
+- **O helper confere o UID do outro lado** (via `/proc/net/tcp`; TCP não tem `SO_PEERCRED`).
+  Loopback é compartilhado por todos os usuários da máquina. `--allow-any-uid` desliga.
+- **Transferência OUT não é mais copiada** para o buffer de saída antes de ir para a libusb:
+  eram ~819 KB por quadro, ~49 MB/s de cópia inútil a 60 fps.
+- **`make check-abi`** compara os símbolos decorados do binário (`_libusb_init@4` — o `@N`
+  *é* o tamanho de pilha stdcall) contra `abi.expected`. Errar a convenção de chamada é o
+  único erro que não dá mensagem: o processo morre sem explicação.
+- ⚠️ **O formato de fio é congelado de propósito.** DLL e helper de versões diferentes
+  continuam conversando — verificado: os 32 exports e as decorações são idênticos antes e
+  depois da revisão.
 
 ## Segurança
 

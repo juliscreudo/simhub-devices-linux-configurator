@@ -4,9 +4,16 @@
 #
 #   c872:2007  F-PRO
 #   c872:200a  GT-PRO V2
-#   c872:200b  AC190
-#   c872:200c  AMG
+#   c872:200b  AMG (projeto AC190)   ✅ validado com hardware
+#   c872:200c  AMG (variante 200c)
 #   c872:2010  Astra
+#
+# ⚠️ NOMENCLATURA: o volante e' vendido e conhecido como **AMG**; AC190 e' o
+# nome do projeto. Os dois PIDs acima tem managers distintos no catalogo do
+# SimHub (CubeControlsAC190LedsManager e CubeControlsAMGLedsManager), ambos
+# sobre o mesmo CubeControlsLedsDriverV2. O que esta' na bancada e' o 200b; o
+# 200c pode ser uma variante que a Cube Controls ainda nao lancou. A regra cobre
+# os dois -- e a faixa inteira -- entao a distincao nao muda nada aqui.
 #
 # Instalar:
 #   sudo cp udev/70-cubecontrols.rules /etc/udev/rules.d/
@@ -20,7 +27,6 @@
 # /usr/lib/udev/rules.d/73-seat-late.rules e' quem efetiva a tag uaccess, e
 # uma regra numerada 99- adiciona a tag DEPOIS dessa checagem ja' ter rodado.
 #
-#
 # POR QUE `20??` E NAO SO' O VENDOR
 #
 # c872 e' TAMBEM o VID das telas VoCore (PID 1004, coberto por
@@ -29,7 +35,7 @@
 # Um Cube Controls novo dentro dessa faixa funciona sem editar este arquivo.
 #
 #
-# MEDIDO NO AC190 (c872:200b), 2026-08-19
+# MEDIDO NO AMG/AC190 (c872:200b), 2026-08-19
 #
 # report descriptor de 66 bytes, UMA UNICA top-level collection:
 #
@@ -44,6 +50,7 @@
 # MCP. `CubeControlsAC190LedsManager` pede pid=0x200B usage=4 vid=0xC872 (IL
 # medido) e casa direto com o unico PDO que o Wine expoe -- NAO e' o caso da
 # PDU5 (usagePage 0xFF): aqui basta hidraw + EnableHidraw, sem patch de IL.
+# ✅ Confirmado com hardware em 2026-08-19.
 #
 # TAG+="uaccess" -- ver 70-pokornyi.rules para o porque de nao usar MODE.
 

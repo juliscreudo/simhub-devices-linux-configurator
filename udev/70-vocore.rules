@@ -6,7 +6,7 @@
 #   sudo cp udev/70-vocore.rules /etc/udev/rules.d/
 #   sudo udevadm control --reload-rules && sudo udevadm trigger
 #
-# ⚠️ Prefixo 70- obrigatorio -- mesma razao do 70-conspit.rules: quem efetiva
+# ⚠️ Prefixo 70- obrigatorio -- mesma razao do 70-pokornyi.rules: quem efetiva
 # a tag e' o 73-seat-late.rules, e uma regra 99- chega tarde demais.
 #
 #
@@ -25,9 +25,16 @@
 # Sob Wine esse passo nao existe e nao deve ser reproduzido: instalaria um
 # driver de kernel do Windows, que o Wine nao executa. ⚠️ E a `winusb.dll`
 # builtin do Wine e' STUB (medido em 2026-08-16: "(%p) - stub" nas strings) --
-# uma versao anterior deste comentario afirmava que ela repassava para a
-# libusb do host, o que e' falso. O caminho SimHub->tela NAO funciona sob o
-# Wine atual; ver a secao VoCore do CLAUDE.md para o estado real.
+# uma versao anterior deste comentario afirmava que ela repassava para a libusb
+# do host, o que e' falso. Ou seja: o backend Windows da libusb nao tem como
+# funcionar sob o Wine atual.
+#
+# ⚠️ ATUALIZADO EM 2026-08-18: a conclusao acima continua correta sobre o
+# caminho NATIVO, mas "a tela nao funciona" CAIU. A tela da PDU5 mostra o dash
+# do SimHub, pela aba Devices, desde 2026-08-18 -- por uma terceira via, a ponte
+# de traducao da libusb (~/apps/wine-libusb-bridge): uma libusb-1.0.dll PE pura
+# que repassa as chamadas a libusb-1.0.so do Linux. O touch tambem funciona,
+# pelo mesmo caminho. Ver o passo 4 do README.
 #
 #
 # O QUE REALMENTE FALTA: ESCRITA NO NO' USB
@@ -46,12 +53,15 @@
 # EXATO, e nao o vendor inteiro -- um volante Cube Controls e' um device HID
 # e nao tem nada a ver com esta regra.
 #
-# ⚠️ Isto libera o ACESSO, que e' condicao necessaria mas talvez nao
-# suficiente. O CLAUDE.md documenta um segundo bloqueio, independente deste:
-# volantes com tela pedem `HasParentHub=True` e o SimHub sobe a arvore USB
-# para saber a QUAL volante a tela pertence -- arvore que o Wine nao expoe
-# (PortSignature/UsbPath lancam NullReferenceException em 100% dos devices).
-# A entrada "Generic Vocore Screen" do catalogo talvez nao dependa desse
-# casamento; e' justamente o que esta regra permite testar.
+# ⚠️ Isto libera o ACESSO, que e' condicao NECESSARIA e nao suficiente: falta
+# ainda a ponte libusb estar instalada e o helper dela de pe' antes do SimHub
+# (`simhub-devices install bridge --apply`, e abrir pelo `run-simhub`).
+#
+# O segundo bloqueio historico -- o SimHub sobe a arvore USB para saber a QUAL
+# volante cada tela pertence (`HasParentHub=True`), e o PnP do Wine nao expoe
+# essa arvore (PortSignature/UsbPath lancam NullReferenceException em 100% dos
+# devices) -- foi resolvido junto: a topologia que o SimHub usa vem da PROPRIA
+# libusb (libusb_get_parent / get_port_numbers), e a ponte a responde a partir
+# da arvore USB real do Linux. Medido: UsbPath 5:2-2-4-2-4 para a tela da PDU5.
 
 SUBSYSTEM=="usb", ATTR{idVendor}=="c872", ATTR{idProduct}=="1004", TAG+="uaccess"

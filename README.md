@@ -56,16 +56,28 @@ Validated with the hardware connected on **CachyOS** (kernel 7.1, Wine 11.15), b
 | Pokornyi GTB Pro | `0483:cb11` | LEDs (HID) + screen | ✅ **hardware-validated** |
 | Pokornyi FGT | `0483:cb15` | LEDs (HID) | ✅ **validated** — plugging it in and restarting SimHub was enough |
 | Pokornyi RALLY | `0483:cb12` | LEDs (HID) | ✅ **validated** — same, zero new steps |
-| Cube Controls AMG (AC190) | `c872:200b` | LEDs + buttons (HID) | ✅ **hardware-validated** |
+| Cube Controls AMG | `c872:200b` | LEDs + buttons (HID) | ✅ **hardware-validated** |
 | VoCore screen | `c872:1004` | dash + **touch** (libusb) | ✅ **validated** — 854×480, via the bridge |
 
 The **FGT** is the evidence that the recipe generalizes: it had never been connected to this
 bench, and plugging it in and restarting SimHub was enough — no device-specific configuration
 at all. The why is in [CLAUDE.md](CLAUDE.md).
 
+> **On the Cube Controls AMG:** the wheel everyone calls **AMG** is the **AC190** project, and
+> that's the one validated here (`c872:200b`). SimHub's catalog also carries a
+> `CubeControlsAMGLedsManager` pointing at a *different* PID (`c872:200c`) — possibly a newer
+> AMG that hasn't shipped yet. Both are covered by the same udev rule and the same registry
+> list, so the distinction changes nothing in practice: **what tells them apart is the PID, not
+> the commercial name.**
+>
+> ⚠️ One measured difference worth knowing: the `200c` manager asks for HID **`usage 8`**,
+> while every other Cube Controls asks for `4`. If that device exposes a Joystick collection
+> (`usage 4`), it hits exactly the PDU5 wall — `Searching device ...` with nothing in the log.
+> See step [5](#step-5--pdu5-pdu7-and-led-brows-leds).
+
 And what the recipes **should** cover, with nobody having tested it: the remaining Pokornyi
 devices (PDU7, LED Brows, LMPH, F499, HYP-R PRO, LMP PRO V2, GTE PRO V3), the rest of
-Cube Controls (F-PRO, GT-PRO V2, Astra) and the other Conspit wheels (300GT,
+Cube Controls (F-PRO, GT-PRO V2, CSX3, GTX2, Astra, and the `200c` AMG variant) and the other Conspit wheels (300GT,
 MAX 01, 310 APEX, 290 GP, PW1, CSD). SimHub's catalog holds **more than 200 devices**; the
 three paths below cover the vast majority.
 
@@ -558,10 +570,12 @@ the **manager's constants**, and what showed up in the log. That's what makes it
 say whether the recipe generalizes or whether that model has something of its own. Open an
 issue with those three.
 
-> ⚠️ **Strip the serial number before pasting log output into an issue.** `install serial`
-> shows the device's **USB serial**, and a serial is more than an identifier: several vendors
-> use it as proof of ownership for warranty claims. If someone files a claim with **yours**,
-> you're the one who can end up without coverage. Replace it with `<SERIAL>`.
+> ⚠️ **Serials are masked by default now — check anyway.** A serial is more than an
+> identifier: several vendors use it as proof of ownership for warranty claims. If someone
+> files a claim with **yours**, you're the one who can end up without coverage. So `hidenum`
+> prints `<INSTANCIA>` in place of the instance ID (`--serial` gives you the real one, for
+> local use), and `install serial`'s dry-run echoes `<SERIAL>` instead of the USB serial.
+> Anything you paste from another source, replace by hand.
 >
 > `doctor` also prints absolute paths containing your username — far less serious, but swap in
 > `~/` if you like. **VID/PID and model can stay**: they're public vendor data, and they're
@@ -617,10 +631,13 @@ to a device problem — ignore them when diagnosing the Devices tab.
 | `tools/pdu5-leds-patch.py` | the PDU5 `usagePage` patch (`--check` / `--apply` / `--revert`) |
 | `tools/ildump.py` | disassembles a type's IL — calls and constants survive obfuscation |
 | `tools/ilgrep.py` | finds who calls a given method |
+| `tools/ilcommon.py` | shared .NET metadata reader for the three tools above |
 | `tools/hidenum.c` | enumerates HID **from inside the prefix**: what SimHub actually sees |
 | `tools/nameprobe.c` | shows which SetupAPI name API answers what (used in step 3) |
 | `udev/70-pokornyi.rules` | ACLs for `/dev/hidraw*` for Pokornyi (`0483:cb??`) |
+| `udev/70-cubecontrols.rules` | ACLs for `/dev/hidraw*` for Cube Controls (`c872:20??`) |
 | `udev/70-vocore.rules` | write access to the VoCore screen's USB node (`c872:1004`) |
+| `attic/` | the superseded `mpro_drm` + MMF path — kept as a fallback, not part of the install |
 
 The two C probes build with mingw:
 

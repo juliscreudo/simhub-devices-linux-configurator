@@ -2,10 +2,16 @@
 #
 # Devices desta bancada (VID 0483, PIDs CBxx):
 #
-#   0483:cb40  PE MCP ButtonBox
-#   0483:cb41  PE MCP EncoderBox
-#   0483:cb42  PE MCP IgnitionBox
-#   0483:cb01  PE PDU5          (+ tela VoCore c872:1004, fora desta regra)
+#   0483:cb40  PE MCP ButtonBox     ✅ validado com hardware
+#   0483:cb41  PE MCP EncoderBox    ✅
+#   0483:cb42  PE MCP IgnitionBox   ✅
+#   0483:cb01  PE PDU5              ✅ (+ tela VoCore c872:1004, fora desta regra)
+#   0483:cb10  PE HYP-R             ✅ (+ tela)
+#   0483:cb11  PE GTB Pro           ✅ (+ tela)
+#   0483:cb12  PE RALLY             ✅
+#   0483:cb15  PE FGT               ✅
+#
+# ... e todo o resto da faixa cb??, sem editar nada (ver o fim do arquivo).
 #
 # Instalar:
 #   sudo cp udev/70-pokornyi.rules /etc/udev/rules.d/
@@ -15,7 +21,7 @@
 #   sudo rm /etc/udev/rules.d/70-pokornyi.rules
 #   sudo udevadm control --reload-rules && sudo udevadm trigger
 #
-# ⚠️ O PREFIXO 70- E' OBRIGATORIO -- mesma razao do 70-conspit.rules:
+# ⚠️ O PREFIXO 70- E' OBRIGATORIO -- mesma razao do 70-cubecontrols.rules:
 # /usr/lib/udev/rules.d/73-seat-late.rules e' quem efetiva a tag uaccess, e
 # uma regra numerada 99- adiciona a tag DEPOIS dessa checagem ja' ter rodado.
 # O builtin nunca dispara e o hidraw continua root-only, em silencio.
@@ -43,17 +49,20 @@
 #
 # POR QUE `cb??` E NAO SO' O VENDOR
 #
-# O 70-conspit.rules casa so' por idVendor de proposito, porque 3514 e' um
-# VID exclusivo da Conspit. Aqui NAO da' para fazer o mesmo: 0483 e' o VID
+# A regra equivalente do projeto irmao conspit-linux-configurator casa so' por
+# idVendor de proposito, porque 3514 e' um VID exclusivo da Conspit (aquele
+# arquivo vive LA', nao neste repo). Aqui NAO da' para fazer o mesmo: 0483 e' o VID
 # generico da STMicroelectronics, compartilhado com incontaveis projetos
 # STM32 (inclusive DIY). Dar ACL a `0483` inteiro liberaria hidraw de
 # hardware que nao tem nada a ver com esta bancada.
 #
 # `cb??` mantem a generalizacao onde ela importa: TODOS os PIDs do catalogo
-# Pokornyi no SimHub estao na faixa CBxx (cb01 PDU5, cb02 PDU7, cb03 LED
-# Brows, cb10 HYP-R, cb11 GTB Pro, cb12 RALLY, cb14 F499, cb15 FGT, cb40
-# ButtonBox, cb41 EncoderBox, cb42 IgnitionBox). Um Pokornyi novo ligado na
-# bancada funciona sem editar este arquivo.
+# Pokornyi no SimHub estao na faixa CBxx (cb01 PDU5, cb02 PDU7, cb03 LED Brows,
+# cb10 HYP-R, cb11 GTB Pro, cb12 RALLY, cb13 LMPH, cb14 F499, cb15 FGT,
+# cb16 HYP-R Pro, cb17 LMP PRO V2, cb18 GTE PRO V3, cb40 ButtonBox,
+# cb41 EncoderBox, cb42 IgnitionBox -- a lista completa esta' no CATALOGO de
+# tools/simhub-devices). Um Pokornyi novo ligado na bancada funciona sem editar
+# este arquivo: foi assim que FGT, RALLY e GTB Pro conectaram de primeira.
 #
 # TAG+="uaccess" faz o logind conceder ACL ao usuario da sessao ativa --
 # preferivel a MODE="0666", que liberaria para qualquer usuario da maquina.
