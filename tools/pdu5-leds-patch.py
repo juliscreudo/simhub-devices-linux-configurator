@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Corrige o usagePage/usage que impede os LEDs da PDU5/PDU7/LED Brows no Wine.
 
-O problema (medido em 2026-08-18, ver implementation-plan.md):
+O problema (medido em 2026-08-18, ver CLAUDE.md, secao "O usagePage/usage e' POR MANAGER"):
   PokornyiPEPDU5Manager.GetDriver() pede a collection HID vendor
   (usagePage 0xFF, usage 1). O descriptor da PDU5 e' uma collection Joystick
   VAZIA com a vendor ANINHADA dentro -- e o Wine so' promove a PDO as collections

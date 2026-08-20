@@ -624,9 +624,8 @@ sobrevive à ofuscação, e é o que as ferramentas acima extraem: **strings, co
 chamadas**.
 
 O detalhamento técnico completo — arquitetura da aba Devices, as hipóteses testadas e
-refutadas, e as armadilhas de método — está em [CLAUDE.md](CLAUDE.md) e
-[implementation-plan.md](implementation-plan.md) (ambos em português; eles também servem de
-contexto para LLM).
+refutadas, e as armadilhas de método — está em [CLAUDE.md](CLAUDE.md) (em português; também
+serve de contexto para LLM).
 
 ---
 

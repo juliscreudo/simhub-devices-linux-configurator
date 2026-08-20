@@ -451,7 +451,6 @@ patch no SimHub, nenhum `mpro_drm`.
   (`shim.c`, `helper.c`, `proto.h`).
 - Medido: `open` ok, `claim_interface(0)` ok, `bulk ep=0x02 len=819840 actual=819840`
   (854×480×2 = frame cheio em RGB565), `USB Path 5:2-2-4-2-4` resolvido **pela libusb real**.
-- Log do teste decisivo e das armadilhas operacionais: `implementation-plan.md`.
 - ⚠️ **A DLL cai a cada update do SimHub** — o original fica em `libusb-1.0.dll.orig`.
 - ⚠️ **O helper precisa estar de pé ANTES do SimHub**, senão a DLL devolve erro.
 - ⚠️ **Suba o SimHub pelo `lsu-launch-wrapper`, nunca com `wine SimHubWPF.exe` direto.** Por

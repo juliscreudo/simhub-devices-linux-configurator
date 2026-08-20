@@ -637,9 +637,8 @@ the prefix's DLLs**, and the code is obfuscated — method names become CJK char
 and calls**.
 
 The full technical detail — the Devices tab's architecture, the hypotheses tested and refuted,
-and the methodological traps — lives in [CLAUDE.md](CLAUDE.md) and
-[implementation-plan.md](implementation-plan.md) (both in Portuguese; they double as LLM
-context).
+and the methodological traps — lives in [CLAUDE.md](CLAUDE.md) (in Portuguese; it doubles as
+LLM context).
 
 ---
 
