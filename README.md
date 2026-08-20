@@ -53,6 +53,7 @@ Validated with the hardware connected on **CachyOS** (kernel 7.1, Wine 11.15), b
 | Pokornyi MCP IgnitionBox | `0483:cb42` | LEDs + buttons (HID) | ✅ **hardware-validated** |
 | Pokornyi PDU5 | `0483:cb01` | RPM LEDs (HID) + screen | ✅ **validated** — needs step 5 |
 | Pokornyi HYP-R | `0483:cb10` | LEDs (HID) + screen | ✅ **hardware-validated** |
+| Pokornyi GTB Pro | `0483:cb11` | LEDs (HID) + screen | ✅ **LEDs validated** — screen retest pending |
 | Pokornyi FGT | `0483:cb15` | LEDs (HID) | ✅ **validated** — plugging it in and restarting SimHub was enough |
 | Pokornyi RALLY | `0483:cb12` | LEDs (HID) | ✅ **validated** — same, zero new steps |
 | Cube Controls AMG (AC190) | `c872:200b` | LEDs + buttons (HID) | ✅ **hardware-validated** |
@@ -63,7 +64,7 @@ bench, and plugging it in and restarting SimHub was enough — no device-specifi
 at all. The why is in [CLAUDE.md](CLAUDE.md).
 
 And what the recipes **should** cover, with nobody having tested it: the remaining Pokornyi
-devices (PDU7, LED Brows, GTB Pro, LMPH, F499, HYP-R PRO, LMP PRO V2, GTE PRO V3), the rest of
+devices (PDU7, LED Brows, LMPH, F499, HYP-R PRO, LMP PRO V2, GTE PRO V3), the rest of
 Cube Controls (F-PRO, GT-PRO V2, Astra) and the other Conspit wheels (300GT,
 MAX 01, 310 APEX, 290 GP, PW1, CSD). SimHub's catalog holds **more than 200 devices**; the
 three paths below cover the vast majority.
@@ -213,6 +214,7 @@ simhub-devices install registry        winebus: EnableHidraw / Enable SDL / Disa
 simhub-devices install bridge          libusb bridge DLL + the run-simhub launcher
 simhub-devices install pdu5-leds       usagePage patch + NGen cache removal
 simhub-devices install serial [...]    serial recipe: PnP node + COM port
+simhub-devices install shortcut        menu shortcut that goes through run-simhub
 simhub-devices post-update             redoes what a SimHub update undoes
 simhub-devices clean-cache             removes the NGen cache
 ```
@@ -380,7 +382,9 @@ libusb has it.
 - ⚠️ **Always use `run-simhub`.** The helper must be up **before** SimHub, otherwise the
   bridge DLL returns an error and the screen won't connect; and a helper left dangling after
   SimHub dies keeps the interface claimed, causing `LIBUSB_ERROR_BUSY` next time. The launcher
-  handles both ends.
+  handles both ends. **Opening it from the Windows/Wine menu shortcut doesn't count** — it
+  launches SimHub directly, without the bridge. `tools/simhub-devices install shortcut --apply`
+  creates a menu shortcut that goes through `run-simhub`.
 - ⚠️ If you have the `mpro_drm` kernel module loaded, **unload it** (`rmmod mpro`): with it the
   kernel claims the interface and the bridge stops seeing the device. The two cannot coexist.
 

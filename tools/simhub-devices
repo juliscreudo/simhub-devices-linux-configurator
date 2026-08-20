@@ -4,7 +4,8 @@
     simhub-devices doctor                  diagnostico (padrao; so' leitura)
     simhub-devices install udev            ACL de /dev/hidraw* e do no USB da tela
     simhub-devices install registry        winebus: EnableHidraw / Enable SDL / DisableInput
-    simhub-devices install bridge          DLL da ponte libusb + unit systemd do helper
+    simhub-devices install bridge          DLL da ponte libusb + launcher run-simhub
+    simhub-devices install shortcut        atalho de menu que abre pelo run-simhub
     simhub-devices install pdu5-leds       patch do usagePage + remocao do cache NGen
     simhub-devices install serial [...]    receita 2: no PnP + COM para device serial
     simhub-devices post-update             refaz o que um update do SimHub desfaz
@@ -90,8 +91,12 @@ CATALOGO = {
 #    hid do CATALOGO (nao incremental) e cb?? ja cobre cb12. Terceira confirmacao de
 #    que a receita generaliza; a mais barata das tres, porque nao exigiu nenhum passo
 #    manual alem do que ja tinha sido aplicado para outro device.
-TESTADOS = {("0483","cb01"), ("0483","cb10"), ("0483","cb12"), ("0483","cb15"),
-            ("0483","cb40"), ("0483","cb41"), ("0483","cb42"),
+# ⚠️ cb11 (GTB Pro): LEDs conectaram na hora (quarta confirmacao). A TELA nao --
+#    mas por causa alheia ao device: SimHub aberto pelo atalho que o Wine gera
+#    sozinho, que pula o helper da ponte. Nao e' falha de receita; 'install
+#    shortcut' resolve o atalho. Tela ainda sem reteste com o helper de pe'.
+TESTADOS = {("0483","cb01"), ("0483","cb10"), ("0483","cb11"), ("0483","cb12"),
+            ("0483","cb15"), ("0483","cb40"), ("0483","cb41"), ("0483","cb42"),
             ("c872","200b"), ("c872","1004")}
 
 
@@ -510,6 +515,58 @@ def instalar_ponte():
     print(f"  {INFO} lsu-launch-wrapper a telemetria nao chega.\n")
 
 
+# ⚠️ NAO editar o .desktop que o Wine gera em wine/Programs/SimHub/SimHub.desktop:
+#    winemenubuilder o RECRIA sempre que o prefixo reindexa o Start Menu (reinstall,
+#    update, as vezes so' abrir o winecfg) -- editar aquele arquivo direto e' consertar
+#    algo que volta sozinho. A correcao que fica e' um atalho NOSSO, fora da arvore que
+#    o Wine gerencia, apontando pro run-simhub.
+ATALHO_WINE = os.path.expanduser(
+    "~/.local/share/applications/wine/Programs/SimHub/SimHub.desktop")
+ATALHO_NOSSO = os.path.expanduser(
+    "~/.local/share/applications/simhub-devices-linux-run-simhub.desktop")
+
+
+def instalar_atalho():
+    print("\n== atalho de menu (abre pelo run-simhub) ==\n")
+    icone = "simhub"
+    if os.path.exists(ATALHO_WINE):
+        for linha in open(ATALHO_WINE, encoding="utf-8"):
+            if linha.startswith("Icon="):
+                icone = linha.strip().split("=", 1)[1]
+                break
+        print(f"  {INFO} icone reaproveitado do atalho que o Wine gerou: {icone}")
+    else:
+        print(f"  {AVISO} atalho do Wine nao encontrado em {ATALHO_WINE}")
+        print(f"  {AVISO} (abra o SimHub uma vez pelo menu do Windows dentro do prefixo")
+        print(f"  {AVISO}  para o Wine extrair o icone, ou ajuste 'Icon=' a mao depois)")
+
+    lanc = os.path.expanduser("~/.local/bin/run-simhub")
+    if not os.path.exists(lanc):
+        lanc = os.path.join(REPO, "tools", "run-simhub")
+
+    conteudo = (
+        "[Desktop Entry]\n"
+        "Name=SimHub\n"
+        "Comment=Abre a ponte libusb e o SimHub, nessa ordem\n"
+        f"Exec={lanc}\n"
+        "Terminal=false\n"
+        "Type=Application\n"
+        "StartupNotify=true\n"
+        f"Icon={icone}\n"
+        "Categories=Game;\n"
+    )
+    passo(f"escrever {ATALHO_NOSSO}")
+    if APLICAR:
+        os.makedirs(os.path.dirname(ATALHO_NOSSO), exist_ok=True)
+        with open(ATALHO_NOSSO, "w", encoding="utf-8") as f:
+            f.write(conteudo)
+        os.chmod(ATALHO_NOSSO, 0o644)
+
+    print(f"\n  {AVISO} o Wine tambem tem um atalho \"SimHub\" proprio, em")
+    print(f"  {AVISO} wine/Programs/SimHub/ — ele abre direto (sem a ponte). Os dois vao")
+    print(f"  {AVISO} aparecer no menu com o mesmo nome; use este daqui.\n")
+
+
 def instalar_pdu5_leds():
     """Patch do usagePage + remocao do NGen. ⚠️ OS DOIS, sempre.
 
@@ -642,7 +699,7 @@ def main():
     sub = ap.add_subparsers(dest="cmd")
     sub.add_parser("doctor", parents=[comum])
     ins = sub.add_parser("install", parents=[comum]).add_subparsers(dest="alvo")
-    for nome_ in ("udev", "registry", "bridge", "pdu5-leds"):
+    for nome_ in ("udev", "registry", "bridge", "pdu5-leds", "shortcut"):
         ins.add_parser(nome_, parents=[comum])
     ser = ins.add_parser("serial", parents=[comum])
     ser.add_argument("--dev"); ser.add_argument("--vid", default="3514")
@@ -661,13 +718,14 @@ def main():
         limpar_cache()
     elif a.cmd == "install":
         acoes = {"udev": instalar_udev, "registry": instalar_registro,
-                 "bridge": instalar_ponte, "pdu5-leds": instalar_pdu5_leds}
+                 "bridge": instalar_ponte, "pdu5-leds": instalar_pdu5_leds,
+                 "shortcut": instalar_atalho}
         if a.alvo in acoes:
             acoes[a.alvo]()
         elif a.alvo == "serial":
             instalar_serial(a)
         else:
-            sys.exit("install: use udev | registry | bridge | pdu5-leds | serial")
+            sys.exit("install: use udev | registry | bridge | pdu5-leds | serial | shortcut")
     if not APLICAR:
         print(f"  {AVISO} DRY-RUN — nada foi alterado. Repita com --apply.\n")
 

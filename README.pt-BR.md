@@ -53,6 +53,7 @@ Validado com o hardware conectado em **CachyOS** (kernel 7.1, Wine 11.15), entre
 | Pokornyi MCP IgnitionBox | `0483:cb42` | LEDs + botões (HID) | ✅ **validado com hardware** |
 | Pokornyi PDU5 | `0483:cb01` | LEDs RPM (HID) + tela | ✅ **validado** — precisa do passo 5 |
 | Pokornyi HYP-R | `0483:cb10` | LEDs (HID) + tela | ✅ **validado com hardware** |
+| Pokornyi GTB Pro | `0483:cb11` | LEDs (HID) + tela | ✅ **LEDs validados** — tela pendente de reteste |
 | Pokornyi FGT | `0483:cb15` | LEDs (HID) | ✅ **validado** — plugar e reabrir o SimHub bastou |
 | Pokornyi RALLY | `0483:cb12` | LEDs (HID) | ✅ **validado** — idem, zero passo novo |
 | Cube Controls AMG (AC190) | `c872:200b` | LEDs + botões (HID) | ✅ **validado com hardware** |
@@ -63,7 +64,7 @@ e bastou plugar e reabrir o SimHub — sem nenhuma configuração específica pa
 está em [CLAUDE.md](CLAUDE.md).
 
 E o que a receita **deveria** cobrir, sem ninguém ter testado: os demais Pokornyi (PDU7, LED
-Brows, GTB Pro, LMPH, F499, HYP-R PRO, LMP PRO V2, GTE PRO V3), o restante da Cube Controls
+Brows, LMPH, F499, HYP-R PRO, LMP PRO V2, GTE PRO V3), o restante da Cube Controls
 (F-PRO, GT-PRO V2, Astra) e os demais volantes Conspit (300GT, MAX 01, 310 APEX,
 290 GP, PW1, CSD). São **mais de 200 devices** no catálogo do SimHub; os três caminhos abaixo
 cobrem a grande maioria.
@@ -213,6 +214,7 @@ simhub-devices install registry        winebus: EnableHidraw / Enable SDL / Disa
 simhub-devices install bridge          DLL da ponte libusb + launcher run-simhub
 simhub-devices install pdu5-leds       patch do usagePage + remoção do cache NGen
 simhub-devices install serial [...]    receita serial: nó PnP + porta COM
+simhub-devices install shortcut        atalho de menu que abre pelo run-simhub
 simhub-devices post-update             refaz o que um update do SimHub desfaz
 simhub-devices clean-cache             remove o cache NGen
 ```
@@ -370,7 +372,9 @@ VoCore é `c872:1004`, o SimHub descobre a qual volante cada uma pertence subind
 - ⚠️ **Sempre use o `run-simhub`.** O helper precisa estar de pé **antes** do SimHub, senão a
   DLL devolve erro e a tela não conecta; e um helper pendurado depois que o SimHub morre deixa
   a interface reivindicada, dando `LIBUSB_ERROR_BUSY` na próxima abertura. O launcher cuida
-  dos dois lados.
+  dos dois lados. **Abrir pelo atalho de menu do Windows/Wine não conta** — ele chama o
+  SimHub direto, sem a ponte. `tools/simhub-devices install shortcut --apply` cria um atalho
+  de menu que já passa pelo `run-simhub`.
 - ⚠️ Se você tiver o módulo de kernel `mpro_drm` carregado, **descarregue** (`rmmod mpro`): com
   ele o kernel reivindica a interface e a ponte para de enxergar o device. Os dois não convivem.
 

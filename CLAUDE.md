@@ -610,7 +610,7 @@ revisão de firmware.
 | Cube Controls AMG | `c872:200c` | não | `CubeControlsAMGLedsManager` (HID) | não testado — receita 1, mesmo driver do AC190 |
 | Pokornyi HYP-R | `0483:cb10` | **sim** | composite: LEDs (HID) + tela | ✅ **LEDs e tela conectam** (2026-08-18) |
 | Pokornyi F499 | `0483:cb14` | **sim** | composite: LEDs (HID) + tela | não testado |
-| Pokornyi GTB Pro | `0483:cb11` | **sim** | composite: LEDs (HID) + tela | não testado |
+| Pokornyi GTB Pro | `0483:cb11` | **sim** | composite: LEDs (HID) + tela | ✅ **LEDs conectam**; tela pendente (2026-08-19) |
 | Pokornyi PDU7 | `0483:cb02` | **sim** | composite: LEDs (HID) + tela | não testado |
 
 ⚠️ Outra unidade do mesmo modelo pode diferir — confirme com `lsusb` ao plugar.
@@ -620,6 +620,32 @@ o `usagePage 0xFF` é **por manager**, não por marca. A PDU5 falha porque o des
 uma collection Joystick **vazia** (nenhum botão, nenhum eixo — é um dash, não um controle).
 Um HYP-R ou F499, que têm botões de verdade, provavelmente têm descriptor como o dos MCP —
 **meça com `hidenum` e com `ildump.py` no manager do modelo antes de concluir**.
+
+## GTB Pro e o atalho de menu do Wine — 2026-08-19
+
+LEDs do GTB Pro (`0483:cb11`) conectaram na hora de plugar, mesmo padrão do FGT/RALLY —
+quarta confirmação. **A tela não conectou**, mas por um motivo já catalogado e alheio ao
+GTB Pro: o usuário abriu o SimHub pelo item de menu do CachyOS, que é o atalho que o
+`winemenubuilder` do Wine gera sozinho em `wine/Programs/SimHub/SimHub.desktop` — ele chama
+`lsu-launch-wrapper` direto, **sem** subir o helper da ponte libusb primeiro. Sem o helper de
+pé, a `libusb-1.0.dll` da ponte devolve erro na primeira chamada e a tela nunca aparece —
+comportamento já documentado (seção "Telas VoCore"), não um caso novo.
+
+⚠️ **Por que não dá para editar aquele `.desktop` direto**: o Wine o recria sempre que o
+prefixo reindexa o Start Menu (reinstall, update, às vezes só abrir o `winecfg`). É o mesmo
+problema que o projeto irmão `conspit-linux-configurator` já tinha resolvido para o
+ConspitLink — a correção que fica é um atalho **fora** da árvore que o Wine gerencia.
+
+Adicionado `simhub-devices install shortcut`: lê o `Icon=` do atalho do Wine (evita precisar
+extrair o ícone de novo), e escreve
+`~/.local/share/applications/simhub-devices-linux-run-simhub.desktop` com `Exec=run-simhub`.
+Os dois atalhos convivem com o mesmo `Name=SimHub` — o do Wine continua existindo e
+reaparecendo, só que agora há um alternativo correto ao lado. Não tentei suprimir o do Wine
+(precisaria de um `Hidden=true` casando o Desktop ID exato dele,
+`wine-Programs-SimHub-SimHub.desktop`, e voltaria a cada regeneração de qualquer forma).
+
+**Tela do GTB Pro ainda não confirmada com o helper de pé** — falta reabrir pelo atalho novo
+(ou `run-simhub` direto) e checar a aba Devices de novo.
 
 ## Pokornyi RALLY — a confirmação mais barata das três
 
@@ -703,16 +729,19 @@ Passos 1–3 **feitos e validados** em 2026-08-16 (os três MCP). O que sobra:
    aplicar em qualquer device novo** — quando a (c) falha, o resultado é a PDU5.
    ⚠️ Falta a **AMG**: continua sendo o teste mais informativo que resta, por ser outro
    fabricante (VID `c872`, manager `CubeControlsAMGLedsManager`).
-5. Um volante com tela (HYP-R, F499, GTB Pro): **antes de plugar**, rode `ildump.py` no
-   manager do modelo e veja o `usagePage`/`usage` que ele pede. Se for `1/4`, a metade dos
-   LEDs deve conectar como nos MCP; se for `0xFF/1`, cai no mesmo muro da PDU5.
+5. ~~Um volante com tela~~ HYP-R ✅ e GTB Pro ✅ confirmam o padrão: `usagePage 1/4`, LEDs
+   conectam sem patch. **Falta o F499** — antes de plugar, `ildump.py` no
+   `PokornyiF499Manager` para o mesmo check; se vier `0xFF/1`, é o muro da PDU5.
 6. **PDU5 (LEDs)**: sem correção por registro/udev. Depende de o Wine promover a collection
    vendor aninhada a PDO próprio — candidato a issue/patch no Wine, com um caso de teste
    pequeno e claro (descriptor de 35 bytes, na receita 1).
 7. ~~**Telas VoCore**~~ ✅ **RESOLVIDO em 2026-08-18** pela ponte libusb
-   (`tools/libusb-bridge/`), não pelo DRM nativo. O que falta ali é acabamento: confirmar o
-   **touch**, criar unit systemd para o helper subir antes do SimHub, e reinstalar a DLL
-   após cada update do SimHub.
+   (`~/apps/wine-libusb-bridge`), não pelo DRM nativo. ~~Confirmar o touch~~ ✅. ~~Subir o
+   helper antes do SimHub~~ ✅ resolvido pelo launcher `run-simhub` (não unit systemd — ver
+   "Projetos irmãos"), e desde 2026-08-19 também por `simhub-devices install shortcut`, que
+   cria um atalho de menu fora da árvore do Wine apontando pro `run-simhub` — o atalho que o
+   Wine gera sozinho (`winemenubuilder`) abre direto, sem a ponte, e some/reaparece a cada
+   reinstall/update. Falta só reinstalar a DLL da ponte após cada update do SimHub.
 
 ## Segurança
 
