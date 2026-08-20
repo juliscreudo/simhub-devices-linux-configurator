@@ -16,29 +16,55 @@
 #   3. Helper pendurado depois que o SimHub morre deixa a interface USB
 #      reivindicada -> LIBUSB_ERROR_BUSY na proxima abertura.
 
+# ⚠️ so' `-u`. Com `set -e`, um `porta_ocupada && break` que falha na ultima
+# iteracao do laco derruba o script inteiro -- o erro sai como "nao abriu" sem
+# nenhuma mensagem. Os pontos que importam sao checados explicitamente.
 set -u
 
-PONTE="${PONTE:-$HOME/apps/wine-libusb-bridge}"
+# ⚠️ MESMA precedencia do `simhub-devices` ($SIMHUB_PONTE -> vendor/ -> copia de
+# desenvolvimento). Fixar $HOME/apps/wine-libusb-bridge aqui fazia o instalador
+# copiar a DLL do vendor/ para o SimHub enquanto este script subia o helper da
+# copia local: duas metades da ponte de versoes diferentes.
+REPO_DIR="$(cd -- "$(dirname -- "$(readlink -f -- "$0")")/.." && pwd)"
+if [ -n "${SIMHUB_PONTE:-}" ]; then
+    PONTE="$SIMHUB_PONTE"
+elif [ -d "$REPO_DIR/vendor/wine-libusb-bridge" ]; then
+    PONTE="$REPO_DIR/vendor/wine-libusb-bridge"
+else
+    PONTE="${PONTE:-$HOME/apps/wine-libusb-bridge}"
+fi
+
 LSU="${LSU:-$HOME/apps/linux-simracing-utils}"
 HELPER="$PONTE/libusb-bridge-helper"
 WRAPPER="$LSU/bin/lsu-launch-wrapper"
 SIMHUB_EXE='C:\Program Files (x86)\SimHub\SimHubWPF.exe'
-PORTA=47100
+
+# ⚠️ uma porta so' para os dois lados: a DLL dentro do Wine le' esta MESMA
+# variavel (wine-libusb-bridge/shim.c), por isso ela e' exportada.
+PORTA="${LIBUSB_BRIDGE_PORT:-47100}"
+export LIBUSB_BRIDGE_PORT="$PORTA"
 
 erro() { printf '\033[31merro:\033[0m %s\n' "$1" >&2; exit 1; }
 info() { printf '\033[36m[run-simhub]\033[0m %s\n' "$1"; }
 
-[ -x "$HELPER" ]  || erro "helper nao encontrado ou sem permissao de execucao: $HELPER"
+[ -x "$HELPER" ]  || erro "helper nao encontrado ou sem permissao de execucao: $HELPER
+   (compile com 'make -C $PONTE', ou rode 'simhub-devices install bridge --apply')"
 [ -x "$WRAPPER" ] || erro "lsu-launch-wrapper nao encontrado: $WRAPPER"
 
 porta_ocupada() { ss -ltn 2>/dev/null | grep -q ":$PORTA "; }
+
+# ⚠️ mesmo filtro do simhub-devices: `pgrep -f` casa a linha de comando inteira,
+# entao um `wine taskkill /im SimHubWPF.exe` em curso e' falso positivo. Os dois
+# scripts precisam concordar sobre "o SimHub esta rodando"; discordando, um mata
+# a ponte enquanto o outro acha que o app ainda esta' de pe'.
+simhub_vivo() { pgrep -af 'SimHub[W]PF\.exe' 2>/dev/null | grep -qv taskkill; }
 
 NOSSO_HELPER=""
 if porta_ocupada; then
     info "ponte ja estava no ar (porta $PORTA) — nao vou mexer nela"
 else
-    info "subindo a ponte libusb..."
-    "$HELPER" &
+    info "subindo a ponte libusb (porta $PORTA)..."
+    "$HELPER" -p "$PORTA" &
     NOSSO_HELPER=$!
     for _ in $(seq 1 25); do
         porta_ocupada && break
@@ -49,6 +75,7 @@ else
 fi
 
 limpar() {
+    trap - EXIT INT TERM              # nao rodar duas vezes no caminho do sinal
     if [ -n "$NOSSO_HELPER" ] && kill -0 "$NOSSO_HELPER" 2>/dev/null; then
         info "encerrando a ponte (pid $NOSSO_HELPER)"
         kill "$NOSSO_HELPER" 2>/dev/null
@@ -60,10 +87,26 @@ trap limpar EXIT INT TERM
 info "abrindo o SimHub pelo lsu-launch-wrapper"
 "$WRAPPER" "$SIMHUB_EXE"
 
-# O wrapper devolve o controle assim que o SimHub e' lancado em segundo plano,
-# entao esperamos o processo de verdade sumir antes de derrubar a ponte.
-sleep 5
-while pgrep -f 'SimHub[W]PF\.exe' >/dev/null 2>&1; do
+# O wrapper devolve o controle assim que o SimHub e' lancado em segundo plano.
+#
+# ⚠️ ESPERAR O PROCESSO APARECER, nao dormir um tempo fixo. Antes havia um
+# `sleep 5` e o laco de espera ja' comecava perguntando se o app tinha morrido:
+# num prefixo frio (ou logo depois de um update) o SimHub leva mais que isso para
+# existir, o pgrep dava vazio na primeira volta, o trap derrubava a ponte e a
+# tela nao conectava -- justamente a armadilha nº 1 la' de cima, causada pelo
+# script que existe para evita-la. E intermitente, que e' o pior tipo.
+info "aguardando o SimHub aparecer..."
+for _ in $(seq 1 120); do
+    simhub_vivo && break
+    sleep 1
+done
+if ! simhub_vivo; then
+    info "o SimHub nao apareceu em 120s — encerrando a ponte"
+    exit 1
+fi
+info "SimHub no ar; a ponte fica de pe' enquanto ele estiver"
+
+while simhub_vivo; do
     sleep 3
 done
 info "SimHub encerrado"

@@ -29,14 +29,22 @@ do caminho em /dev/serial/by-id/ e de um numero de COM.
    "LEDs quebrados" quando o SimHub nunca chegou a escanea-la — e a causa final era
    o cache NGen engolindo o patch de IL, coisa que nenhum log denuncia.
 """
+import argparse
 import glob
 import os
 import re
+import shutil
 import subprocess
 import sys
 
 PFX = os.path.expanduser("~/apps/linux-simracing-utils/pfx")
 SH_DIR = os.path.join(PFX, "drive_c/Program Files (x86)/SimHub")
+
+# ⚠️ A porta e' UMA SO' para os tres lados: a DLL da ponte le' LIBUSB_BRIDGE_PORT
+#    (ver wine-libusb-bridge/shim.c), o helper aceita -p, e o run-simhub sobe o
+#    helper. Cravar 47100 aqui fazia o doctor dizer "helper FORA" com o helper no
+#    ar, sempre que alguem mudasse a porta.
+PONTE_PORTA = int(os.environ.get("LIBUSB_BRIDGE_PORT", "47100"))
 
 OK, AVISO, ERRO, INFO = "\033[32m✅\033[0m", "\033[33m⚠️\033[0m", "\033[31m❌\033[0m", "  "
 
@@ -60,8 +68,17 @@ CATALOGO = {
     ("c872", "1004"): ("Tela VoCore",             "usb", "precisa da ponte wine-libusb-bridge"),
     ("c872", "2007"): ("Cube Controls F-PRO",     "hid", ""),
     ("c872", "200a"): ("Cube Controls GT-PRO V2", "hid", ""),
-    ("c872", "200b"): ("Cube Controls AC190",     "hid", ""),
-    ("c872", "200c"): ("Cube Controls AMG",       "hid", ""),
+    # ⚠️ NOMENCLATURA. O volante que a Cube Controls vende como **AMG** e' o
+    #    projeto AC190 (c872:200b): e' assim que 99% dos usuarios o chamam, e e'
+    #    a unidade validada com hardware aqui. O manager CubeControlsAMGLedsManager
+    #    do catalogo aponta para OUTRO pid (200c) -- possivelmente um AMG novo que
+    #    a Cube Controls ainda nao lancou. Os dois ficam sob o nome AMG; quem
+    #    desempata e' o PID, nunca o nome comercial.
+    ("c872", "2008"): ("Cube Controls CSX3",      "hid", ""),
+    ("c872", "200b"): ("Cube Controls AMG (AC190)", "hid", ""),
+    ("c872", "200c"): ("Cube Controls AMG (200c)",  "hid",
+                       "manager pede usage 8, nao 4 — se o device expuser Joystick, e' o caso da PDU5"),
+    ("c872", "200d"): ("Cube Controls GTX2",      "hid", ""),
     ("c872", "2010"): ("Cube Controls Astra",     "hid", ""),
     # Conspit: TODOS usam StandardProtocolManager = serial (medido no catalogo, 2026-08-19)
     ("3514", "0007"): ("Conspit H.AO HUB",        "serial", "receita 2: no PnP + DEVPKEY_NAME"),
@@ -79,13 +96,24 @@ CATALOGO = {
 #    cb??, o EnableHidraw sai deste CATALOGO, e o manager pede usagePage 1/4, que e'
 #    a collection que o Wine expoe. Ao acrescentar um device novo aqui, confira essas
 #    tres coisas antes de esperar o mesmo resultado.
-# ⚠️ c872:200b (AC190) foi o primeiro Cube Controls plugado (2026-08-19) e NAO estava
+# ⚠️ c872:200b (AMG/AC190) foi o primeiro Cube Controls plugado (2026-08-19) e NAO estava
 #    no CATALOGO nem tinha regra udev -- por isso "Searching device..." apesar do
 #    device estar corretamente em modo USB. Report descriptor medido: UMA collection
 #    Generic Desktop/Joystick (usage 4), vendor por Report ID dentro dela -- mesmo
 #    padrao dos MCP, SEM o problema de usagePage da PDU5. So' faltava udev + registro.
 #    ✅ validado com hardware em 2026-08-19: install udev + install registry --apply
 #    bastaram, sem patch de IL nem NGen.
+# ⚠️ c872:2008 (CSX3) e c872:200d (GTX2) entraram em 2026-08-20, medidos no IL dos
+#    managers do proprio catalogo (`GetDevice(pid, usage=4, vid=0xC872)`, mesmo
+#    padrao do AMG/AC190). Nao testados com hardware -- mas a regra udev `20??` ja
+#    os cobria, e agora o EnableHidraw tambem. E' a mesma cobertura "por faixa de
+#    PID cadastrada" que fez o RALLY funcionar antes de alguem pensar nele.
+# ⚠️ c872:200c pede **usage 8**, e nao 4 como TODOS os outros Cube Controls
+#    (medido no IL em 2026-08-20). Se o device expuser uma collection Joystick
+#    (usage 4), o MatchUsage nunca casa e o sintoma sera' o da PDU5: "Searching
+#    device..." sem UMA linha no log. Meça com o hidenum antes de concluir que o
+#    device esta quebrado -- e, se for o caso, a correcao e' um patch de IL como o
+#    pdu5-leds-patch.py, trocando o 8 por 4.
 # ⚠️ cb12 (RALLY) conectou em 2026-08-19 SEM NENHUM passo novo -- nem udev nem CATALOGO
 #    precisaram de edicao, porque install registry --apply ja escreve a lista CHEIA de
 #    hid do CATALOGO (nao incremental) e cb?? ja cobre cb12. Terceira confirmacao de
@@ -100,25 +128,31 @@ TESTADOS = {("0483","cb01"), ("0483","cb10"), ("0483","cb11"), ("0483","cb12"),
             ("c872","200b"), ("c872","1004")}
 
 
+def ler(caminho):
+    """Conteudo de um arquivo de texto, ou None se nao der para ler."""
+    try:
+        with open(caminho, encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
 def usb_presentes():
     achados = []
     for d in sorted(glob.glob("/sys/bus/usb/devices/*")):
-        try:
-            vid = open(os.path.join(d, "idVendor")).read().strip()
-            pid = open(os.path.join(d, "idProduct")).read().strip()
-        except OSError:
+        vid = ler(os.path.join(d, "idVendor"))
+        pid = ler(os.path.join(d, "idProduct"))
+        if vid is None or pid is None:
             continue
-        achados.append((vid, pid, os.path.basename(d)))
+        achados.append((vid.strip(), pid.strip(), os.path.basename(d)))
     return achados
 
 
 def hidraw_de(vid, pid):
     """No hidraw do device + se o usuario tem acesso de leitura/escrita."""
     for h in glob.glob("/sys/class/hidraw/hidraw*"):
-        uevent = os.path.join(h, "device/uevent")
-        try:
-            txt = open(uevent).read()
-        except OSError:
+        txt = ler(os.path.join(h, "device/uevent"))
+        if txt is None:
             continue
         m = re.search(r"HID_ID=\w+:0000([0-9A-Fa-f]{4}):0000([0-9A-Fa-f]{4})", txt)
         if m and m.group(1).lower() == vid and m.group(2).lower() == pid:
@@ -128,17 +162,18 @@ def hidraw_de(vid, pid):
 
 
 def no_usb_acessivel(porta):
-    try:
-        busnum = open(f"/sys/bus/usb/devices/{porta}/busnum").read().strip()
-        devnum = open(f"/sys/bus/usb/devices/{porta}/devnum").read().strip()
-    except OSError:
+    busnum = ler(f"/sys/bus/usb/devices/{porta}/busnum")
+    devnum = ler(f"/sys/bus/usb/devices/{porta}/devnum")
+    if busnum is None or devnum is None:
         return None, False
     no = f"/dev/bus/usb/{int(busnum):03d}/{int(devnum):03d}"
     return no, os.access(no, os.R_OK | os.W_OK)
 
 
 def ngen_ativo():
-    """True se ha imagem nativa de SimHub.Plugins — ela IGNORA patches de IL.
+    """Imagens nativas de SimHub.Plugins presentes (lista, vazia = nenhuma).
+
+    Elas IGNORAM patches de IL.
 
     O SimHub roda 32-bit e executa a imagem pre-compilada; qualquer patch em
     SimHub.Plugins.dll vira no-op ate essa pasta ser removida. Sondas x64 JIT-am
@@ -146,16 +181,16 @@ def ngen_ativo():
     """
     ni = os.path.join(PFX, "drive_c/windows/assembly/NativeImages_v4.0.30319_32")
     if not os.path.isdir(ni):
-        return False
+        return []
     return [d for d in os.listdir(ni) if d.startswith("SimHub.Plug")]
 
 
 def helper_da_ponte_no_ar():
     try:
         out = subprocess.run(["ss", "-ltn"], capture_output=True, text=True).stdout
-        return ":47100" in out
-    except FileNotFoundError:
+    except (FileNotFoundError, OSError):
         return False
+    return f":{PONTE_PORTA} " in out or out.rstrip().endswith(f":{PONTE_PORTA}")
 
 
 
@@ -178,7 +213,7 @@ def checar_camadas():
     ok_lsu = os.path.isdir(lsu) and os.path.exists(wrapper)
     print(f"  {OK if ok_lsu else ERRO} 1. linux-simracing-utils  {lsu}")
     if not ok_lsu:
-        print(f"       instala o SimHub e cria o prefixo. Sem ele nao ha o que configurar.")
+        print("       instala o SimHub e cria o prefixo. Sem ele nao ha o que configurar.")
     else:
         print(f"       {INFO} lsu-launch-wrapper presente (sobe o winehub = telemetria)")
 
@@ -188,12 +223,11 @@ def checar_camadas():
     ponte = ponte_dir()
     tem = os.path.isdir(ponte)
     compilada = tem and os.path.exists(os.path.join(ponte, "libusb-1.0.dll"))
-    versao = open(ARQ_VERSAO).read().strip() if os.path.exists(ARQ_VERSAO) else "copia local"
-    print(f"  {OK if compilada else (AVISO if tem else ERRO)} 3. wine-libusb-bridge     {ponte}  ({versao})")
+    print(f"  {OK if compilada else (AVISO if tem else ERRO)} 3. wine-libusb-bridge     {ponte}  ({ponte_versao(ponte)})")
     if not tem:
-        print(f"       so' necessaria para as telas VoCore; 'install bridge' resolve.")
+        print("       so' necessaria para as telas VoCore; 'install bridge' resolve.")
     elif not compilada:
-        print(f"       presente mas nao compilada — 'install bridge --apply' roda o make.")
+        print("       presente mas nao compilada — 'install bridge --apply' roda o make.")
 
     instalada = os.path.exists(os.path.join(SH_DIR, "libusb-1.0.dll.orig"))
     print(f"  {OK if instalada else INFO} 4. ponte instalada no SimHub"
@@ -222,9 +256,15 @@ def doctor():
                 print(f"    {ERRO} {no} sem permissao — falta a regra udev (TAG+=\"uaccess\")")
         elif receita == "usb":
             no, pode = no_usb_acessivel(porta)
-            print(f"    {OK if pode else ERRO} {no} {'acessivel' if pode else 'sem permissao (falta udev)'}")
-            print(f"    {OK if helper_da_ponte_no_ar() else ERRO} helper da ponte "
-                  f"{'no ar' if helper_da_ponte_no_ar() else 'FORA — a tela nao vai conectar'}")
+            if no is None:
+                # ⚠️ distinguir dos casos de permissao: aqui o no nem existe.
+                print(f"    {ERRO} no USB nao encontrado em /sys — o device sumiu do barramento?")
+            else:
+                print(f"    {OK if pode else ERRO} {no} "
+                      f"{'acessivel' if pode else 'sem permissao (falta udev)'}")
+            no_ar = helper_da_ponte_no_ar()      # uma consulta so', nao duas
+            print(f"    {OK if no_ar else ERRO} helper da ponte (porta {PONTE_PORTA}) "
+                  f"{'no ar' if no_ar else 'FORA — a tela nao vai conectar'}")
         elif receita == "serial":
             print(f"    {INFO} receita serial: confira o no PnP e o DEVPKEY_NAME no prefixo")
 
@@ -260,14 +300,19 @@ def doctor():
 # ---------------------------------------------------------------- infraestrutura
 
 APLICAR = False          # ⚠️ dry-run por padrao; --apply liga
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# ⚠️ realpath, NAO abspath: o comando e' usado pelo PATH, via symlink em
+#    ~/.local/bin/simhub-devices. Com abspath, REPO virava ~/.local e o
+#    'install udev' morria com "nenhuma regra em ~/.local/udev" -- ou seja, o
+#    passo 1 do README nao funcionava exatamente do jeito documentado de instalar.
+REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 # ---- dependencia externa: wine-libusb-bridge -------------------------------
 # Mesmo modelo do linux-simracing-utils: NAO e' submodule e nao e' versionada
 # junto. O instalador traz a release fixada para um diretorio ignorado e anota a
 # versao num arquivo. A ponte e' produto generico (serve qualquer app Windows sob
 # Wine com libusb sincrona); pendura-la dentro de um repo de sim racing inverteria
 # o desenho que motivou separar as duas.
-PONTE_REPO = os.environ.get("SIMHUB_PONTE_REPO", "juliscreudo/wine-libusb-bridge")
+PONTE_REPO_PADRAO = "juliscreudo/wine-libusb-bridge"
+PONTE_REPO = os.environ.get("SIMHUB_PONTE_REPO", PONTE_REPO_PADRAO)
 PONTE_VERSAO = os.environ.get("SIMHUB_PONTE_VERSION", "")   # vazio = ultima release
 VENDOR = os.path.join(REPO, "vendor", "wine-libusb-bridge")
 ARQ_VERSAO = os.path.join(REPO, ".ponte-version")
@@ -289,15 +334,41 @@ def ponte_dir():
     return os.path.expanduser("~/apps/wine-libusb-bridge")
 
 
+def ponte_versao(ponte):
+    """Rotulo de versao da ponte REALMENTE em uso.
+
+    ⚠️ .ponte-version descreve o que o instalador baixou para vendor/. Ler o
+    arquivo sem olhar de onde a ponte veio fazia o doctor anunciar a tag de um
+    vendor/ que nem estava em uso, enquanto rodava a copia de desenvolvimento."""
+    if os.path.abspath(ponte) != os.path.abspath(VENDOR):
+        return "copia local"
+    txt = ler(ARQ_VERSAO)
+    return txt.strip() if txt else "vendor/ sem .ponte-version"
+
+
 def ponte_baixar():
     """Busca a release fixada do GitHub para vendor/. Devolve True se trouxe algo.
 
     ⚠️ Enquanto o repo da ponte nao for publicado isto nao tem o que buscar, e o
-    fallback e' a copia local de desenvolvimento."""
+    fallback e' a copia local de desenvolvimento.
+
+    ⚠️ O que vem daqui e' COMPILADO e instalado no prefixo. Por isso o repo de
+    origem so' pode ser trocado com consentimento explicito: SIMHUB_PONTE_REPO
+    apontando para outro lugar significaria `make` em codigo de terceiro. Para
+    desenvolver contra um fork, use SIMHUB_PONTE (diretorio local, sem download)
+    ou passe SIMHUB_PONTE_REPO_OK=1 assumindo o risco."""
     if not PONTE_REPO:
         print(f"  {INFO} a ponte ainda nao tem repo publicado; usando copia local")
         return False
+    if PONTE_REPO != PONTE_REPO_PADRAO and os.environ.get("SIMHUB_PONTE_REPO_OK") != "1":
+        print(f"  {AVISO} SIMHUB_PONTE_REPO aponta para '{PONTE_REPO}', que nao e' o repo")
+        print(f"  {AVISO} padrao ({PONTE_REPO_PADRAO}). O tarball seria compilado e")
+        print(f"  {AVISO} instalado no prefixo. Confirme com SIMHUB_PONTE_REPO_OK=1,")
+        print(f"  {AVISO} ou use SIMHUB_PONTE=<diretorio> para apontar uma copia local.")
+        return False
+    import io
     import json
+    import tarfile
     import urllib.error
     import urllib.request
     api = f"https://api.github.com/repos/{PONTE_REPO}/releases/"
@@ -305,33 +376,54 @@ def ponte_baixar():
     passo(f"buscar release da ponte: {api}")
     if not APLICAR:
         return False
+    rede = (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError)
     try:
         with urllib.request.urlopen(api, timeout=15) as r:
             rel = json.load(r)
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as e:
+        tag = rel.get("tag_name", "?")
+        fonte = rel.get("tarball_url")
+        if not fonte:
+            print(f"  {AVISO} release {tag} sem tarball — usando copia local")
+            return False
+        # ⚠️ o download do tarball estava FORA do try: uma queda de rede aqui
+        #    derrubava o comando com traceback em vez do fallback documentado.
+        with urllib.request.urlopen(fonte, timeout=60) as r:
+            dados = r.read()
+    except rede as e:
         print(f"  {AVISO} nao consegui buscar a release ({e}) — usando copia local")
         return False
-    tag = rel.get("tag_name", "?")
-    fonte = rel.get("tarball_url")
-    if not fonte:
-        print(f"  {AVISO} release {tag} sem tarball — usando copia local")
+    except (ValueError, KeyError) as e:
+        print(f"  {AVISO} resposta inesperada da API ({e}) — usando copia local")
         return False
-    import io
-    import tarfile
-    with urllib.request.urlopen(fonte, timeout=60) as r:
-        dados = r.read()
+
     os.makedirs(os.path.dirname(VENDOR), exist_ok=True)
-    import shutil
     if os.path.isdir(VENDOR):
         shutil.rmtree(VENDOR)
-    with tarfile.open(fileobj=io.BytesIO(dados), mode="r:gz") as t:
-        raiz = t.getnames()[0].split("/")[0]
-        t.extractall(os.path.dirname(VENDOR), filter="data")
-        os.rename(os.path.join(os.path.dirname(VENDOR), raiz), VENDOR)
-    open(ARQ_VERSAO, "w").write(tag + "\n")
-    print(f"  {OK} ponte {tag} em vendor/")
+    try:
+        with tarfile.open(fileobj=io.BytesIO(dados), mode="r:gz") as t:
+            nomes = t.getnames()
+            if not nomes:
+                print(f"  {AVISO} tarball vazio — usando copia local")
+                return False
+            raiz = nomes[0].split("/")[0]
+            t.extractall(os.path.dirname(VENDOR), filter="data")
+        extraido = os.path.join(os.path.dirname(VENDOR), raiz)
+        if os.path.isdir(VENDOR):
+            shutil.rmtree(VENDOR)
+        os.rename(extraido, VENDOR)
+    except (tarfile.TarError, OSError) as e:
+        print(f"  {AVISO} nao consegui extrair a release ({e}) — usando copia local")
+        return False
+    with open(ARQ_VERSAO, "w", encoding="utf-8") as f:
+        f.write(tag + "\n")
+    print(f"  {OK} ponte {tag} em vendor/  (sha256 do tarball: {_sha256(dados)[:16]}…)")
     return True
 NGEN = os.path.join(PFX, "drive_c/windows/assembly/NativeImages_v4.0.30319_32")
+
+
+def _sha256(dados):
+    import hashlib
+    return hashlib.sha256(dados).hexdigest()
 
 
 def passo(texto):
@@ -370,13 +462,23 @@ def backup(caminho, sufixo):
         return alvo
     passo(f"backup: {alvo}")
     if APLICAR:
-        import shutil
         shutil.copy2(caminho, alvo)
     return alvo
 
 
+def mascarar_serial(texto):
+    r"""Troca o numero de serie USB por <SERIAL> na saida de tela.
+
+    ⚠️ O caminho PnP da receita 2 termina no serial do device
+    (`Enum\USB\VID_xxxx&PID_xxxx\<serial>`), e a saida de dry-run e' justamente
+    o que se cola num issue para pedir ajuda. Serial nao e' metadado: fabricante
+    usa serial como prova de titularidade em garantia. O registro recebe o valor
+    real; quem e' mascarado e' o ECO na tela."""
+    return re.sub(r"(PID_[0-9A-Fa-f]{4}\\)([^\\\]\s\"]{4,})", r"\1<SERIAL>", texto)
+
+
 def importar_reg(conteudo, rotulo):
-    """Escreve um .reg e importa com regedit /S.
+    """Escreve um .reg e importa com regedit /S. Devolve True se aplicou.
 
     ⚠️ `reg add` NAO escreve REG_MULTI_SZ nem hex(ffff0012); .reg + regedit e' o
     unico caminho que funciona (custou uma rodada de diagnostico na receita 2)."""
@@ -384,16 +486,27 @@ def importar_reg(conteudo, rotulo):
     passo(f"importar registro: {rotulo}")
     if not APLICAR:
         for l in conteudo.strip().split("\n")[:6]:
-            print(f"           | {l}")
-        return
-    with tempfile.NamedTemporaryFile("w", suffix=".reg", delete=False,
-                                     encoding="utf-16") as f:
-        f.write(conteudo)
-        tmp = f.name
-    env = dict(os.environ, WINEPREFIX=PFX, WINEDEBUG="-all")
-    subprocess.run(["wine", "regedit", "/S", tmp], env=env,
-                   capture_output=True, text=True)
-    os.unlink(tmp)
+            print(f"           | {mascarar_serial(l)}")
+        return False
+    tmp = None
+    try:
+        with tempfile.NamedTemporaryFile("w", suffix=".reg", delete=False,
+                                         encoding="utf-16") as f:
+            f.write(conteudo)
+            tmp = f.name
+        env = dict(os.environ, WINEPREFIX=PFX, WINEDEBUG="-all")
+        r = subprocess.run(["wine", "regedit", "/S", tmp], env=env,
+                           capture_output=True, text=True)
+        # ⚠️ o returncode era descartado: um regedit que falha (prefixo travado,
+        #    wineserver caindo) imprimia "aplicando" e nao gravava nada. Falha
+        #    silenciosa e' exatamente o que este script existe para nao repetir.
+        if r.returncode != 0:
+            sys.exit(f"{ERRO} regedit falhou (codigo {r.returncode}) em '{rotulo}'\n"
+                     f"   {(r.stderr or r.stdout).strip()[-400:]}")
+    finally:
+        if tmp and os.path.exists(tmp):
+            os.unlink(tmp)
+    return True
 
 
 def multi_sz(linhas):
@@ -416,6 +529,19 @@ def devprop_string(texto):
 
 # ------------------------------------------------------------------------ acoes
 
+def rodar(cmd, oque):
+    """subprocess com erro legivel. ⚠️ check=True cru vira traceback de
+    CalledProcessError, que esconde o que falhou de quem so' quer instalar."""
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True)
+    except FileNotFoundError:
+        sys.exit(f"{ERRO} nao encontrei '{cmd[0]}' no PATH ({oque}).")
+    if r.returncode != 0:
+        sys.exit(f"{ERRO} falhou ao {oque}: {' '.join(cmd)}\n"
+                 f"   {(r.stderr or r.stdout).strip()[-400:]}")
+    return r
+
+
 def instalar_udev():
     print("\n== regras udev ==\n")
     origem = os.path.join(REPO, "udev")
@@ -425,34 +551,73 @@ def instalar_udev():
     destino = "/etc/udev/rules.d"
     for r in regras:
         alvo = os.path.join(destino, os.path.basename(r))
-        igual = os.path.exists(alvo) and open(alvo).read() == open(r).read()
-        if igual:
+        if ler(alvo) == ler(r):
             print(f"  {OK} {os.path.basename(r)} ja instalada e identica")
             continue
         passo(f"sudo install -m644 {r} {alvo}")
         if APLICAR:
-            subprocess.run(["sudo", "install", "-m", "644", r, alvo], check=True)
+            rodar(["sudo", "install", "-m", "644", r, alvo], "instalar a regra udev")
     passo("sudo udevadm control --reload && sudo udevadm trigger")
     if APLICAR:
-        subprocess.run(["sudo", "udevadm", "control", "--reload"], check=True)
-        subprocess.run(["sudo", "udevadm", "trigger"], check=True)
+        rodar(["sudo", "udevadm", "control", "--reload"], "recarregar as regras udev")
+        rodar(["sudo", "udevadm", "trigger"], "reaplicar as regras aos devices ja plugados")
     print(f"\n  {INFO} replugue o device (ou reinicie) se a ACL nao aparecer.\n")
+
+
+CHAVE_WINEBUS = "HKLM\\System\\CurrentControlSet\\Services\\winebus"
+
+
+def ler_enable_hidraw():
+    """Entradas VVVV:PPPP ja presentes no EnableHidraw do prefixo.
+
+    Formato de `wine reg query`:  EnableHidraw   REG_MULTI_SZ   a:b\\0c:d\\0..."""
+    try:
+        r = subprocess.run(["wine", "reg", "query", CHAVE_WINEBUS, "/v", "EnableHidraw"],
+                           env=dict(os.environ, WINEPREFIX=PFX, WINEDEBUG="-all"),
+                           capture_output=True, text=True, timeout=60)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None                      # nao da' para saber; None != "esta vazio"
+    if r.returncode != 0:
+        return []                        # chave/valor ainda nao existe
+    for linha in r.stdout.splitlines():
+        if "REG_MULTI_SZ" not in linha:
+            continue
+        valor = linha.split("REG_MULTI_SZ", 1)[1].strip().replace("\r", "")
+        return [e for e in valor.split("\\0") if e]
+    return []
 
 
 def instalar_registro():
     """winebus: EnableHidraw + a rede de seguranca (Enable SDL=0 e DisableInput=1).
 
     ⚠️ A chave e' Services\\winebus, NAO a subchave \\Parameters — o driver nunca
-    le' \\Parameters. Esse erro custou tres dias no projeto Conspit."""
+    le' \\Parameters. Esse erro custou tres dias no projeto Conspit.
+
+    ⚠️ O valor e' COMPARTILHADO do prefixo, nao nosso. O projeto irmao
+    conspit-linux-configurator grava `3514:*` aqui para os pedais CPP.LITE, e
+    escrever a lista do CATALOGO por cima apagava aquilo em silencio -- o pedal
+    sumia da aba Devices e o sintoma aparecia longe da causa. Agora a lista final
+    e' a UNIAO do que ja' existe com o que este projeto precisa."""
     print("\n== registro do prefixo (winebus) ==\n")
     exigir_simhub_parado("install registry")
-    hid = sorted({f"{v}:{p}" for (v, p), (_, rec, _) in CATALOGO.items() if rec == "hid"})
+    nosso = {f"{v}:{p}" for (v, p), (_, rec, _) in CATALOGO.items() if rec == "hid"}
+    existente = ler_enable_hidraw()
+    if existente is None:
+        print(f"  {AVISO} nao consegui ler o EnableHidraw atual (wine indisponivel?).")
+        print(f"  {AVISO} vou gravar so' as entradas deste projeto — se voce tinha")
+        print(f"  {AVISO} outras (ex.: Conspit 3514:*), anote-as antes de continuar.")
+        existente = []
+    alheias = sorted(set(existente) - nosso)
+    hid = sorted(nosso | set(existente))
     reg = ("Windows Registry Editor Version 5.00\n\n"
            "[HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\winebus]\n"
            f'"EnableHidraw"={multi_sz(hid)}\n'
            '"Enable SDL"=dword:00000000\n'
            '"DisableInput"=dword:00000001\n')
     print(f"  {INFO} EnableHidraw com {len(hid)} entradas ({hid[0]} ... {hid[-1]})")
+    if alheias:
+        print(f"  {INFO} preservadas {len(alheias)} entrada(s) de fora do catalogo: "
+              f"{', '.join(alheias)}")
     backup(os.path.join(PFX, "system.reg"), "bak-simhub-devices")
     importar_reg(reg, "Services\\winebus")
     print(f"\n  {INFO} rode 'wineserver -k' para o winebus reler.\n")
@@ -470,8 +635,7 @@ def instalar_ponte():
         sys.exit(f"{ERRO} wine-libusb-bridge nao encontrada.\n"
                  f"   procurei em: $SIMHUB_PONTE, {VENDOR}, ~/apps/wine-libusb-bridge\n"
                  f"   com o repo publicado, 'install bridge --apply' baixa sozinho.")
-    versao = open(ARQ_VERSAO).read().strip() if os.path.exists(ARQ_VERSAO) else "copia local"
-    print(f"  {INFO} ponte: {ponte}  ({versao})")
+    print(f"  {INFO} ponte: {ponte}  ({ponte_versao(ponte)})")
     dll_origem = os.path.join(ponte, "libusb-1.0.dll")
     if not os.path.exists(dll_origem) or not os.path.exists(os.path.join(ponte, "libusb-bridge-helper")):
         passo(f"compilar a ponte: make -C {ponte}")
@@ -488,11 +652,9 @@ def instalar_ponte():
     if os.path.exists(dll_alvo) and not os.path.exists(orig):
         passo(f"preservar a original: {orig}")
         if APLICAR:
-            import shutil
             shutil.copy2(dll_alvo, orig)
     passo(f"instalar DLL da ponte em {dll_alvo}")
     if APLICAR:
-        import shutil
         shutil.copy2(dll_origem, dll_alvo)
 
     # ⚠️ o helper precisa estar de pe' ANTES do SimHub, senao a DLL devolve erro.
@@ -595,11 +757,19 @@ def instalar_pdu5_leds():
     print("\n== PDU5/PDU7/LED Brows: usagePage + NGen ==\n")
     exigir_simhub_parado("install pdu5-leds")
     patcher = os.path.join(REPO, "tools", "pdu5-leds-patch.py")
+    if not os.path.exists(patcher):
+        sys.exit(f"{ERRO} nao encontrei {patcher}")
     passo(f"{patcher} --apply")
     if APLICAR:
         r = subprocess.run([sys.executable, patcher, "--apply"],
                            capture_output=True, text=True)
-        print("           " + (r.stdout or r.stderr).strip().replace("\n", "\n           "))
+        saida = (r.stdout or "") + (r.stderr or "")
+        print("           " + saida.strip().replace("\n", "\n           "))
+        # ⚠️ o returncode era ignorado: "dnfile ausente" ou "SimHub mudou de
+        #    versao" saiam como se fossem sucesso, e o usuario ia procurar o
+        #    problema no hardware.
+        if r.returncode != 0:
+            sys.exit(f"\n{ERRO} o patch do usagePage falhou (codigo {r.returncode}).")
     limpar_ngen()
     print(f"\n  {INFO} os dois passos sao necessarios — nenhum sozinho resolve.\n")
 
@@ -614,7 +784,6 @@ def limpar_ngen():
     for nome in imgs:
         passo(f"mover {nome} -> {guardado}/")
         if APLICAR:
-            import shutil
             os.makedirs(guardado, exist_ok=True)
             destino = os.path.join(guardado, nome)
             if os.path.exists(destino):
@@ -652,8 +821,27 @@ def instalar_serial(args):
     if args.com <= 32:
         sys.exit(f"{ERRO} use COM > 32. O wineboot preenche com1..com32 varrendo\n"
                  f"   /dev/ttyS* e sobrescreve qualquer symlink nessa faixa.")
+    if args.com > 255:
+        sys.exit(f"{ERRO} COM{args.com} fora da faixa util (use 33..255).")
+
+    # ⚠️ Validar ANTES de montar o .reg. Um --vid nao-hex vira um caminho PnP que
+    #    o SimHub nunca casa, e o regedit aceita sem reclamar: falha silenciosa.
+    if not os.path.exists(args.dev):
+        sys.exit(f"{ERRO} --dev nao existe: {args.dev}\n"
+                 f"   rode sem --dev para listar o que ha' em /dev/serial/by-id/.")
+    if not args.dev.startswith("/dev/serial/by-id/"):
+        print(f"  {AVISO} --dev fora de /dev/serial/by-id/: ttyACMn renumera a cada")
+        print(f"  {AVISO} reenumeracao e o symlink passa a apontar para outro device.")
+    for rot, val in (("vid", args.vid), ("pid", args.pid)):
+        if not re.fullmatch(r"[0-9A-Fa-f]{4}", val):
+            sys.exit(f"{ERRO} --{rot} precisa ter 4 digitos hex (recebi '{val}').")
+    # aspas e barra invertida quebram (ou injetam) valores no arquivo .reg
+    if re.search(r'["\\]', args.nome):
+        sys.exit(f"{ERRO} --nome nao pode conter aspas nem barra invertida.")
 
     serial_usb = args.serial or os.path.basename(args.dev).split("_")[-1].split("-")[0]
+    if not re.fullmatch(r"[0-9A-Za-z._-]+", serial_usb):
+        sys.exit(f"{ERRO} nao consegui deduzir o serial USB de --dev; passe --serial.")
     rotulo = f"{args.nome} (COM{args.com})"
     vid, pid = args.vid.upper(), args.pid.upper()
     base = ("HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Enum\\USB"
@@ -708,7 +896,6 @@ def pos_update():
 
 def main():
     global APLICAR
-    import argparse
     ap = argparse.ArgumentParser(prog="simhub-devices", add_help=True,
                                  description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -716,8 +903,15 @@ def main():
                     help="executa de fato (sem isso, so' mostra o que faria)")
     # ⚠️ --apply aceito em qualquer posicao: `install bridge --apply` e' o que a
     #    mao digita naturalmente, e errar isso vira "por que nao fez nada?"
+    #
+    # ⚠️ default=SUPPRESS e' o que faz funcionar NO MEIO (`install --apply bridge`).
+    #    argparse copia o namespace do subparser por cima do namespace do pai, e
+    #    sem SUPPRESS o parser de terceiro nivel reaplicava apply2=False e apagava
+    #    o valor -- o comando virava dry-run em silencio, com o usuario achando que
+    #    tinha pedido para aplicar. Medido nas tres posicoes; ver testes no README.
     comum = argparse.ArgumentParser(add_help=False)
-    comum.add_argument("--apply", action="store_true", dest="apply2")
+    comum.add_argument("--apply", action="store_true", dest="apply2",
+                       default=argparse.SUPPRESS)
     sub = ap.add_subparsers(dest="cmd")
     sub.add_parser("doctor", parents=[comum])
     ins = sub.add_parser("install", parents=[comum]).add_subparsers(dest="alvo")
