@@ -605,7 +605,8 @@ revisão de firmware.
 | Pokornyi PDU5 | `0483:cb01` | **sim** | composite: LEDs (HID) + tela | ✅ **LEDs e tela conectam** (patch + NGen removido) |
 | tela da PDU5 | `c872:1004` | — | `BitmapDisplayDevice` via libusb | ✅ **conecta e mostra o dash** (receita 3: ponte libusb) — MPRO D500FPC931A-A, 854×480 |
 | Pokornyi FGT | `0483:cb15` | não | `PokornyiFGTManager` (HID) | ✅ **conecta** — plugar e reabrir bastou (2026-08-19) |
-| Cube Controls AMG | `c872:200c` | não | `CubeControlsAMGLedsManager` (HID) | não testado — receita 1 |
+| Cube Controls AC190 | `c872:200b` | não | `CubeControlsAC190LedsManager` (HID) | ✅ **conecta** — receita 1 pura, sem usagePage errado (2026-08-19) |
+| Cube Controls AMG | `c872:200c` | não | `CubeControlsAMGLedsManager` (HID) | não testado — receita 1, mesmo driver do AC190 |
 | Pokornyi HYP-R | `0483:cb10` | **sim** | composite: LEDs (HID) + tela | ✅ **LEDs e tela conectam** (2026-08-18) |
 | Pokornyi F499 | `0483:cb14` | **sim** | composite: LEDs (HID) + tela | não testado |
 | Pokornyi GTB Pro | `0483:cb11` | **sim** | composite: LEDs (HID) + tela | não testado |
@@ -618,6 +619,57 @@ o `usagePage 0xFF` é **por manager**, não por marca. A PDU5 falha porque o des
 uma collection Joystick **vazia** (nenhum botão, nenhum eixo — é um dash, não um controle).
 Um HYP-R ou F499, que têm botões de verdade, provavelmente têm descriptor como o dos MCP —
 **meça com `hidenum` e com `ildump.py` no manager do modelo antes de concluir**.
+
+## Cube Controls AC190 — validado em 2026-08-19, e a lacuna era simples
+
+O usuário plugou o que chamava de "Cube Controls AMG" e a aba Devices não conectou. A
+`lsusb`/o descriptor USB do próprio device desmentiram o rótulo: é um **AC190**
+(`c872:200b`), não a AMG (`c872:200c`) — modelos vizinhos, o mesmo erro de que um HYP-R
+"parece" um F499 de longe. `CubeControlsAC190LedsManager` e `CubeControlsAMGLedsManager`
+são managers **distintos**, ambos sobre `CubeControlsLedsDriverV2`. **O device confirmado
+com hardware é o AC190** — a AMG segue não testada.
+
+⚠️ **Por que ficou preso em `Searching device...` sem log nenhum: o device era novo neste
+projeto, e faltavam exatamente os dois passos da receita 1** — não é o muro da PDU5.
+
+1. **Sem regra udev.** `/dev/hidraw24` (o nó do AC190) saía `crw------- root root`. Nenhuma
+   regra deste repo cobria `c872:20??`: a `70-vocore.rules` casa só o PID `1004` (subsystem
+   `usb`, não `hidraw`), e não havia regra nenhuma para os volantes Cube Controls. Criado
+   `udev/70-cubecontrols.rules`, casando `idProduct=="20??"` — cobre toda a faixa conhecida
+   (F-PRO `2007`, GT-PRO V2 `200A`, AC190 `200B`, AMG `200C`, Astra `2010`) sem tocar no
+   `1004` da tela, que não bate no padrão.
+2. **Sem entrada no `EnableHidraw`.** O `CATALOGO` do `tools/simhub-devices` só tinha
+   `c872:200c` (AMG) cadastrado; nada gerava a linha `c872:200b` na lista. Acrescentados os
+   cinco PIDs da faixa Cube Controls ao `CATALOGO`.
+
+**Medido o report descriptor do AC190** (66 bytes, via
+`/sys/bus/usb/devices/1-3:1.0/*/report_descriptor` — leitura raiz não exige udev nem Wine):
+
+```
+05 01 09 04 a1 01                 Generic Desktop / Joystick   <- UMA collection so'
+  85 01 09 01 a1 00 ... c0        Report ID 1: eixos Z/Rx (Pointer, physical)
+  05 09 19 01 29 40 ... 81 02     Button 1..64
+  85 03 06 00 ff 09 01 ... 91 02  Report ID 3: vendor 0xFF00, 19 bytes (OUT — os LEDs)
+  85 02 06 01 ff 09 01 ... b1 02  Report ID 2: vendor 0xFF01, 19 bytes (FEATURE)
+c0
+```
+
+**Mesmo padrão dos MCP Pokornyi, não o da PDU5**: o canal vendor não é uma collection
+aninhada nem irmã — é só um **Report ID diferente dentro da mesma** TLC Joystick. Só existe
+um PDO possível, e é ele que o Wine expõe. Medido no IL:
+`CubeControlsAC190LedsManager.GetDriver()` chama `CubeControlsLedsDriverV2::GetDevice(pid=
+0x200B, usage=4, vid=0xC872)` — **sem** `usagePage` separado no argumento (diferente da
+assinatura do `PokornyiDriver`); a collection pedida é a única que existe. Não há o
+descasamento que trava a PDU5, e portanto **nenhum patch de IL nem NGen entram aqui** — a
+receita 1 pura resolve.
+
+**Confirmado com hardware em 2026-08-19.** `install udev --apply` + `install registry --apply`
++ `wineserver -k`: o AC190 passou a aparecer normalmente na aba Devices, sem precisar de
+patch de IL nem de mexer no NGen — a receita 1 pura bastou.
+
+⚠️ **Continua faltando testar a AMG de verdade** (`c872:200c`). Mesmo driver
+(`CubeControlsLedsDriverV2`), manager irmão — a expectativa é que funcione igual, mas isso
+é inferência do padrão, não medição; o descriptor da AMG pode diferir do AC190.
 
 ## Ordem de trabalho sugerida
 

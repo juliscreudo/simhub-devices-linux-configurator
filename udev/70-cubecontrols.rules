@@ -1,0 +1,50 @@
+# Cube Controls -- acesso hidraw para o SimHub sob Wine
+#
+# Devices conhecidos do catalogo do SimHub (VID c872, PIDs 20xx):
+#
+#   c872:2007  F-PRO
+#   c872:200a  GT-PRO V2
+#   c872:200b  AC190
+#   c872:200c  AMG
+#   c872:2010  Astra
+#
+# Instalar:
+#   sudo cp udev/70-cubecontrols.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+#
+# Desinstalar:
+#   sudo rm /etc/udev/rules.d/70-cubecontrols.rules
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+#
+# ⚠️ O PREFIXO 70- E' OBRIGATORIO -- mesma razao do 70-pokornyi.rules:
+# /usr/lib/udev/rules.d/73-seat-late.rules e' quem efetiva a tag uaccess, e
+# uma regra numerada 99- adiciona a tag DEPOIS dessa checagem ja' ter rodado.
+#
+#
+# POR QUE `20??` E NAO SO' O VENDOR
+#
+# c872 e' TAMBEM o VID das telas VoCore (PID 1004, coberto por
+# 70-vocore.rules -- subsystem USB, nao hidraw). `20??` casa a faixa inteira
+# dos volantes Cube Controls sem abranger a tela: 1004 nao bate no padrao.
+# Um Cube Controls novo dentro dessa faixa funciona sem editar este arquivo.
+#
+#
+# MEDIDO NO AC190 (c872:200b), 2026-08-19
+#
+# report descriptor de 66 bytes, UMA UNICA top-level collection:
+#
+#   Generic Desktop (0x01) / Joystick (0x04)
+#     Report ID 1: eixos Z/Rx (in)
+#     Button 1..64 (in)
+#     Report ID 3: vendor 0xFF00, 19 bytes (out)   <- canal dos LEDs
+#     Report ID 2: vendor 0xFF01, 19 bytes (feature)
+#
+# Sem collection aninhada nem irma -- os relatorios de vendor sao so' Report
+# IDs diferentes DENTRO da mesma collection, exatamente como nos Pokornyi
+# MCP. `CubeControlsAC190LedsManager` pede pid=0x200B usage=4 vid=0xC872 (IL
+# medido) e casa direto com o unico PDO que o Wine expoe -- NAO e' o caso da
+# PDU5 (usagePage 0xFF): aqui basta hidraw + EnableHidraw, sem patch de IL.
+#
+# TAG+="uaccess" -- ver 70-pokornyi.rules para o porque de nao usar MODE.
+
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="c872", ATTRS{idProduct}=="20??", TAG+="uaccess"

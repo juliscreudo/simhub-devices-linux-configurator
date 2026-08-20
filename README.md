@@ -54,6 +54,7 @@ Validated with the hardware connected on **CachyOS** (kernel 7.1, Wine 11.15), b
 | Pokornyi PDU5 | `0483:cb01` | RPM LEDs (HID) + screen | ✅ **validated** — needs step 5 |
 | Pokornyi HYP-R | `0483:cb10` | LEDs (HID) + screen | ✅ **hardware-validated** |
 | Pokornyi FGT | `0483:cb15` | LEDs (HID) | ✅ **validated** — plugging it in and restarting SimHub was enough |
+| Cube Controls AC190 | `c872:200b` | LEDs + buttons (HID) | ✅ **hardware-validated** |
 | VoCore screen | `c872:1004` | dash + **touch** (libusb) | ✅ **validated** — 854×480, via the bridge |
 
 The **FGT** is the evidence that the recipe generalizes: it had never been connected to this
@@ -61,8 +62,8 @@ bench, and plugging it in and restarting SimHub was enough — no device-specifi
 at all. The why is in [CLAUDE.md](CLAUDE.md).
 
 And what the recipes **should** cover, with nobody having tested it: the remaining Pokornyi
-devices (PDU7, LED Brows, GTB Pro, RALLY, LMPH, F499, HYP-R PRO, LMP PRO V2, GTE PRO V3),
-Cube Controls (AMG, F-PRO, GT-PRO V2, AC190, Astra) and the other Conspit wheels (300GT,
+devices (PDU7, LED Brows, GTB Pro, RALLY, LMPH, F499, HYP-R PRO, LMP PRO V2, GTE PRO V3), the
+rest of Cube Controls (AMG, F-PRO, GT-PRO V2, Astra) and the other Conspit wheels (300GT,
 MAX 01, 310 APEX, 290 GP, PW1, CSD). SimHub's catalog holds **more than 200 devices**; the
 three paths below cover the vast majority.
 

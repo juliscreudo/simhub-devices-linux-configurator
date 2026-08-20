@@ -57,7 +57,11 @@ CATALOGO = {
     ("0483", "cb41"): ("Pokornyi MCP EncoderBox", "hid", ""),
     ("0483", "cb42"): ("Pokornyi MCP IgnitionBox","hid", ""),
     ("c872", "1004"): ("Tela VoCore",             "usb", "precisa da ponte wine-libusb-bridge"),
+    ("c872", "2007"): ("Cube Controls F-PRO",     "hid", ""),
+    ("c872", "200a"): ("Cube Controls GT-PRO V2", "hid", ""),
+    ("c872", "200b"): ("Cube Controls AC190",     "hid", ""),
     ("c872", "200c"): ("Cube Controls AMG",       "hid", ""),
+    ("c872", "2010"): ("Cube Controls Astra",     "hid", ""),
     # Conspit: TODOS usam StandardProtocolManager = serial (medido no catalogo, 2026-08-19)
     ("3514", "0007"): ("Conspit H.AO HUB",        "serial", "receita 2: no PnP + DEVPKEY_NAME"),
     ("3514", "000e"): ("Conspit 300GT",           "serial", "receita 2"),
@@ -74,8 +78,15 @@ CATALOGO = {
 #    cb??, o EnableHidraw sai deste CATALOGO, e o manager pede usagePage 1/4, que e'
 #    a collection que o Wine expoe. Ao acrescentar um device novo aqui, confira essas
 #    tres coisas antes de esperar o mesmo resultado.
+# ⚠️ c872:200b (AC190) foi o primeiro Cube Controls plugado (2026-08-19) e NAO estava
+#    no CATALOGO nem tinha regra udev -- por isso "Searching device..." apesar do
+#    device estar corretamente em modo USB. Report descriptor medido: UMA collection
+#    Generic Desktop/Joystick (usage 4), vendor por Report ID dentro dela -- mesmo
+#    padrao dos MCP, SEM o problema de usagePage da PDU5. So' faltava udev + registro.
+#    ✅ validado com hardware em 2026-08-19: install udev + install registry --apply
+#    bastaram, sem patch de IL nem NGen.
 TESTADOS = {("0483","cb01"), ("0483","cb10"), ("0483","cb15"), ("0483","cb40"),
-            ("0483","cb41"), ("0483","cb42"), ("c872","1004")}
+            ("0483","cb41"), ("0483","cb42"), ("c872","200b"), ("c872","1004")}
 
 
 def usb_presentes():
