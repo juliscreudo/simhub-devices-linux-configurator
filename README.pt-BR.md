@@ -17,33 +17,22 @@ Esta é **a solução que eu usei** para pôr meus periféricos para funcionar n
 organizada para que outra pessoa consiga reproduzir.
 
 **O SimHub não foi portado, nem reescrito, nem é redistribuído aqui.** Não existe build Linux
-do SimHub, e o app é o **binário oficial da Wotever**, que você baixa do site deles. O grosso
-deste repositório é **análise, medição e configuração**:
+do SimHub: o app é o **binário oficial da Wotever**, que você baixa do site deles. Este repo é
+análise, medição e configuração.
 
-- descobrir como cada device se apresenta ao kernel e ao Wine, e o que o Wine erra por padrão;
-- regras `udev` que corrigem o acesso;
-- as chaves de registro que fazem o Wine entregar o hardware do jeito que o app espera;
-- ferramentas de diagnóstico (quase todas somente leitura) para conferir cada etapa;
-- documentação do que foi **medido** — incluindo os caminhos errados.
-
-Dito isso, **"não modifica nada" seria mentira**, e a diferença importa o bastante para estar
-aqui em cima e não numa nota de rodapé. O que este projeto altera na *sua* instalação:
+Mas **"não modifica nada" seria mentira**, e a diferença merece estar aqui em cima. O que este
+projeto altera na *sua* instalação:
 
 | o que | o que faz | reversível? |
 |---|---|---|
-| `pdu5-leds-patch.py` | troca **dois opcodes** no IL da sua cópia de `SimHub.Plugins.dll` | sim — `--revert`, com backup automático antes |
-| `install bridge` | substitui a `libusb-1.0.dll` do SimHub pela [nossa](https://github.com/juliscreudo/wine-libusb-bridge) | sim — a original vira `libusb-1.0.dll.orig` |
+| `pdu5-leds-patch.py` | troca **dois opcodes** no IL da sua cópia de `SimHub.Plugins.dll` | sim — `--revert`, com backup antes |
+| `install bridge` | substitui a `libusb-1.0.dll` do SimHub pela [nossa](https://github.com/juliscreudo/wine-libusb-bridge) | sim — a original vira `.orig` |
 | `install pdu5-leds` | remove o cache NGen do prefixo | sim — as imagens são **movidas**, não apagadas |
 | `install udev` / `install registry` | regras udev do sistema e chaves do prefixo | sim — `system.reg` tem backup |
 
-Duas distinções que sustentam a frase lá de cima:
-
-- **O repo distribui o patcher, nunca a DLL corrigida.** A modificação acontece na sua máquina,
-  na sua cópia, e some no próximo update do SimHub. Nenhum binário da Wotever é redistribuído.
-- **A ponte libusb não reimplementa o SimHub** — ela reimplementa a ABI da `libusb-1.0`
-  (32 funções, todas repassadas para a `libusb` do Linux). É biblioteca livre, e é justamente
-  a peça que falta sob Wine. Vive em [repo próprio](https://github.com/juliscreudo/wine-libusb-bridge)
-  porque serve qualquer app Windows, não só o SimHub.
+O repo distribui **o patcher, nunca a DLL corrigida**: a modificação acontece na sua máquina e
+some no próximo update do SimHub. E a ponte não reimplementa o SimHub — ela reimplementa a ABI
+da `libusb-1.0`, biblioteca livre, que é a peça que falta sob Wine.
 
 O SimHub é da **Wotever**; o `linux-simracing-utils` e o Winecarte são da
 **[srounce](https://github.com/srounce)**. Boa parte do crédito pelo que funciona é desses
@@ -67,14 +56,9 @@ Validado com o hardware conectado em **CachyOS** (kernel 7.1, Wine 11.15), entre
 | Pokornyi FGT | `0483:cb15` | LEDs (HID) | ✅ **validado** — plugar e reabrir o SimHub bastou |
 | Tela VoCore | `c872:1004` | dash + **toque** (libusb) | ✅ **validado** — 854×480, via a ponte |
 
-**O FGT é a evidência de que a receita generaliza.** Ele nunca tinha sido ligado nesta bancada:
-foi plugado, o SimHub reiniciado, e funcionou — **sem uma linha de configuração específica para
-ele**. Isso não é sorte, e dá para explicar antes de plugar o próximo: a regra udev casa
-`0483:cb??`, então o PID novo já tinha ACL; o `EnableHidraw` é montado a partir do catálogo do
-instalador, que já listava `cb15`; e o `PokornyiFGTManager` pede `usagePage 1 / usage 4`
-(medido no IL), que é a collection que o Wine **de fato** expõe. É exatamente a checagem do
-[item 4 do roteiro](#4-hid-confira-o-usagepage-do-seu-manager) — e é por não bater nela que a
-PDU5 precisa do passo 5.
+O **FGT** é a evidência de que a receita generaliza: nunca tinha sido ligado nesta bancada,
+e bastou plugar e reabrir o SimHub — sem nenhuma configuração específica para ele. O porquê
+está em [CLAUDE.md](CLAUDE.md).
 
 E o que a receita **deveria** cobrir, sem ninguém ter testado: os demais Pokornyi (PDU7, LED
 Brows, GTB Pro, RALLY, LMPH, F499, HYP-R PRO, LMP PRO V2, GTE PRO V3), a Cube Controls
@@ -194,21 +178,12 @@ bash install.sh          # escolha o componente SimHub
 `libusb-1.0.dll` do app por um repasse à `libusb` do Linux. É o que faz a tela VoCore
 funcionar.
 
-**Não é submodule, de propósito** — a ponte serve qualquer app Windows sob Wine que use a API
-síncrona da libusb, não só o SimHub. O instalador daqui a busca como **dependência de
-camada**, no mesmo modelo que o `linux-simracing-utils` usa para o Winecarte: baixa a release
-fixada para `vendor/` (diretório **gitignorado**) e anota a tag em `.ponte-version`.
+Você não precisa baixá-la: o `install bridge` (passo 4) busca a release fixada para `vendor/`
+sozinho. **Não é submodule de propósito** — a ponte serve qualquer app Windows sob Wine, não só
+o SimHub. Se quiser apontar para outra cópia, use `$SIMHUB_PONTE`; `SIMHUB_PONTE_VERSION` fixa
+uma tag.
 
-Ordem de busca, do mais específico ao menos:
-
-| ordem | onde |
-|---|---|
-| 1 | `$SIMHUB_PONTE` (aponta para onde você quiser) |
-| 2 | `vendor/wine-libusb-bridge` (o que o `install bridge` baixa) |
-| 3 | `~/apps/wine-libusb-bridge` (cópia de desenvolvimento) |
-
-`SIMHUB_PONTE_VERSION` fixa uma tag. Se você não tem tela VoCore, **pule** — nada mais neste
-projeto depende dela.
+Se você não tem tela VoCore, **pule** — nada mais neste projeto depende dela.
 
 ---
 
@@ -254,24 +229,19 @@ tools/simhub-devices install udev --apply
 Instala `udev/70-pokornyi.rules` e `udev/70-vocore.rules`, recarrega as regras e dispara o
 trigger. Replugue o device (ou reinicie) se a ACL não aparecer.
 
-Por padrão `/dev/hidraw*` é **root-only**. Medido em 2026-08-16 com quatro devices ligados:
-todos saíam `crw------- root root`. O `winebus` tentava abrir, falhava, e **descartava o
-device em silêncio** — nem erro, nem log, só o `Searching device ...` para sempre.
-
-O mesmo vale para a tela: `/dev/bus/usb/BBB/DDD` nasce `crw-rw-r--`, e a libusb precisa de
-**escrita** para `libusb_claim_interface`.
+Por padrão `/dev/hidraw*` é **root-only**: o `winebus` tenta abrir, falha, e **descarta o
+device em silêncio** — nem erro, nem log, só o `Searching device ...` para sempre. O mesmo vale
+para a tela, que precisa de **escrita** no nó USB para a libusb reivindicar a interface.
 
 > ⚠️ **O prefixo `70-` é obrigatório.** Quem efetiva a `TAG+="uaccess"` é o
-> `73-seat-late.rules` do systemd. Uma regra numerada `99-` adiciona a tag **depois** dessa
-> checagem já ter rodado: o builtin nunca dispara e o hidraw continua root-only —
-> silenciosamente, sem erro nenhum.
+> `73-seat-late.rules` do systemd, e uma regra `99-` chega depois dessa checagem: o hidraw
+> continua root-only, silenciosamente. Vale para qualquer regra que você acrescente.
 
-> ⚠️ A regra dos Pokornyi casa `0483:cb??`, e **não** o vendor inteiro. `0483` é o VID
-> genérico da STMicroelectronics, compartilhado com incontáveis projetos STM32 (inclusive
-> DIY) — liberar hidraw para `0483` inteiro daria acesso a hardware que não tem nada a ver
-> com sim racing. Todos os PIDs Pokornyi do catálogo estão na faixa `CBxx`, então um Pokornyi
-> novo funciona sem editar o arquivo. A regra da VoCore casa o PID `1004` exato, porque
-> `c872` é **também** o VID da Cube Controls.
+> ⚠️ A regra dos Pokornyi casa `0483:cb??`, **não** o vendor inteiro — `0483` é o VID genérico
+> da STMicroelectronics, e liberá-lo todo daria acesso a hardware sem relação nenhuma com sim
+> racing. Como todo PID Pokornyi está na faixa `CBxx`, um modelo novo funciona sem editar o
+> arquivo. A da VoCore casa o PID `1004` exato, porque `c872` é **também** o VID da Cube
+> Controls.
 
 Confira:
 
@@ -321,16 +291,11 @@ Sem argumento lista tudo; com argumentos, filtra por VID em hex. **O esperado n�
 | vendor **aninhada** (todos os Pokornyi) | **uma** linha: `usage 0x04`, `in 64 out 64` |
 | ainda sintetizado pelo SDL | `usage 0x05` com `out 0` — **errado** nos dois casos |
 
-O Wine só promove a PDO as collections **irmãs**. Numa vendor aninhada o canal é alcançado
-pelo **mesmo handle** do joystick — por isso os LEDs dos MCP funcionam com um PDO só.
+O O Wine só promove a PDO as collections **irmãs**; numa vendor aninhada o canal vem pelo
+**mesmo handle** do joystick — por isso os LEDs dos MCP funcionam com um PDO só.
 
 > ⚠️ **A enumeração tem corrida.** Logo após um `wineserver -k` a primeira passada pode não
 > listar tudo. Meça sempre na segunda, com ~3 s de intervalo.
-
-> ⚠️ **Não use o `hidenum.c` do projeto irmão da Conspit aqui** — ele tem
-> `attr.VendorID == 0x3514` cravado no código e devolve lista vazia para Pokornyi/Cube
-> Controls, fazendo parecer que o device não existe. A versão **deste** repo aceita VID por
-> argumento e marca `[sem acesso]` em vez de omitir o device que não conseguiu abrir.
 
 ## Passo 3 — devices seriais (Conspit e Arduinos)
 
@@ -354,22 +319,14 @@ wineserver -k
 
 ### Por que isso é necessário
 
-No Wine **toda porta COM nasce sem identidade USB** (medido: 36 portas, todas `VID=0 PID=0`).
-A cadeia que o SimHub percorre é:
+No Wine **toda porta COM nasce sem identidade USB** (medido: 36 portas, todas `VID=0 PID=0`),
+e o SimHub casa o device justamente pelo VID/PID da porta. Sem um nó PnP que carregue esses
+dados, o casamento falha em silêncio. O instalador cria esse nó.
 
-1. `StandardProtocolManager` procura a porta COM cujo **USB VID/PID** bate com o descritor;
-2. `SerialPort.GetPortNames()` lê `HKLM\HARDWARE\DEVICEMAP\SERIALCOMM`;
-3. o `WoteverCommon` monta o **nome** do device via `DEVPKEY_NAME` e extrai a porta por uma
-   **regex `\((COM\d+)\)` sobre esse nome**.
-
-Sem um nó PnP com esses dados, o nome cai no fallback, a regex não acha porta nenhuma, e o
-casamento falha em silêncio.
-
-> ⚠️ **O SimHub lê `DEVPKEY_NAME`**, e o Wine só o resolve pela subchave
-> `Properties\{fmtid}\{pid:04X}` com valor `hex(ffff0012)` (UTF-16LE + `00 00`). Sem ela,
-> `SetupDiGetDevicePropertyW` devolve **erro 1168**. `FriendlyName`/`DeviceDesc` legados **não
-> substituem** — o nó "legado" que basta para Qt e ConspitLink **não basta aqui**. Use
-> `tools/nameprobe.c` para ver qual API responde o quê.
+> ⚠️ **O SimHub lê `DEVPKEY_NAME`**, e o Wine só o resolve por uma subchave `Properties\...`
+> com valor `hex(ffff0012)`. `FriendlyName`/`DeviceDesc` legados **não substituem** — o nó
+> "legado" que basta para Qt e ConspitLink **não basta aqui**. Use `tools/nameprobe.c` para
+> ver qual API responde o quê, e [CLAUDE.md](CLAUDE.md) para a cadeia completa.
 
 > ⚠️ **Use COM > 32.** O `wineboot` preenche `com1..com32` varrendo `/dev/ttyS*` e sobrescreve
 > qualquer symlink nessa faixa. O instalador recusa números ≤ 32.
@@ -393,31 +350,18 @@ O `install bridge` baixa (ou compila) a ponte, preserva a `libusb-1.0.dll` origi
 
 ### Por que uma ponte, e não um driver
 
-O caminho do SimHub para a tela é:
-
-```
-SimHub.BitmapDisplay.Vocore.dll -> SimHub.LibUsbNative.dll -> libusb-1.0.dll
-```
-
-É **libusb puro** — a tela é escrita como device USB bruto por endpoints bulk, sem driver de
-display. O que o instalador do SimHub faz no Windows é **ligar o WinUSB ao device** (o que o
-Zadig faz), porque no Windows a libusb não fala com device sem WinUSB/libusbK ligado.
+A tela **não tem driver de display**: o SimHub a escreve como device USB bruto, por libusb
+(`SimHub.BitmapDisplay.Vocore.dll` → `SimHub.LibUsbNative.dll` → `libusb-1.0.dll`). No Windows
+o instalador do SimHub **liga o WinUSB ao device** — sem isso, a libusb não fala com ele.
 
 > ⚠️ **Não tente reproduzir esse passo no prefixo.** Instalaria um driver de kernel do Windows,
-> que o Wine não executa. E a `winusb.dll` builtin do Wine é **stub** (medido: `"(%p) - stub"`
-> nas strings do binário) — não há nada hoje no Wine que faça o backend Windows da libusb
-> funcionar.
+> que o Wine não executa; e a `winusb.dll` builtin do Wine é **stub**. Não há hoje nada no Wine
+> que faça o backend Windows da libusb funcionar.
 
-A ponte pula tudo isso: uma DLL **PE32 pura** repassa as 32 chamadas (todas síncronas) a um
-helper nativo que fala com a `libusb-1.0.so` do Linux por **usbfs**. Nenhum driver de kernel,
-nenhum `winusb`, nenhum patch no SimHub.
-
-Ela resolve **dois** bloqueios de uma vez. O segundo é sutil: todas as telas VoCore são
-`c872:1004` e portanto indistinguíveis, e o SimHub descobre **a qual volante cada tela
-pertence** subindo a árvore USB até o hub pai. Essa árvore **não existe no PnP do Wine**
-(medido: `PortSignature` e `UsbPath` lançam `NullReferenceException` para 100% dos devices,
-porque nenhum controlador USB é exposto). Mas o SimHub pede a topologia à **própria libusb** —
-e a árvore USB real do Linux a tem.
+A ponte pula tudo isso: uma DLL **PE32 pura** repassa as 32 chamadas a um helper nativo que
+fala com a `libusb-1.0.so` do Linux. E resolve um segundo problema de brinde: como toda tela
+VoCore é `c872:1004`, o SimHub descobre a qual volante cada uma pertence subindo a árvore USB —
+árvore que **não existe no PnP do Wine**, mas que ele pede à própria libusb, e a do Linux a tem.
 
 - ✅ O **toque** da tela funciona pela mesma ponte, sem evdev e sem disputa com o desktop: o
   kernel sequer vê a tela como input, já que nenhum driver a reivindica.
@@ -438,36 +382,25 @@ mesma armadilha pode existir em outro manager.
 tools/simhub-devices install pdu5-leds --apply
 ```
 
-São **duas** correções, e **nenhuma sozinha resolve** — verificado por eliminação em
-2026-08-19: revertendo só o patch, a PDU5 volta a não conectar; reaplicando, volta a conectar.
+O comando faz **duas** correções, e **nenhuma sozinha resolve** (verificado por eliminação):
 
-**1. A collection HID errada.** `PokornyiPEPDU5Manager` procura a collection **vendor**
-(`usagePage 0xFF`, `usage 1`). Mas o descriptor da PDU5 é uma collection Joystick **vazia**
-(sem botões e sem eixos — é um dash) com a vendor **aninhada** dentro, e o Wine só promove a
-PDO as collections irmãs. O único PDO que existe é `0x0001/0x04`, então o filtro nunca casa.
-`tools/pdu5-leds-patch.py` troca dois opcodes de mesmo tamanho no IL.
+1. **A collection HID errada.** `PokornyiPEPDU5Manager` procura a collection **vendor**
+   (`usagePage 0xFF`), mas o descriptor da PDU5 é uma collection Joystick **vazia** com a
+   vendor **aninhada** dentro — e o Wine só promove a PDO as collections irmãs. O único PDO
+   que existe é `0x0001/0x04`, então o filtro nunca casa. O patch troca dois opcodes no IL.
+2. **O cache NGen.** O prefixo tem imagens nativas pré-compiladas, e o SimHub roda **32-bit**
+   executando a de `SimHub.Plugins`: **o IL da DLL é ignorado**. Sem remover a imagem, o patch
+   é um no-op.
 
-**2. O cache NGen.** ⚠️ **Esta é a armadilha que custou um dia inteiro.**
+> ⚠️ **Se você for patchear qualquer coisa no SimHub, lembre do NGen.** Sondas compiladas para
+> **x64** JIT-am o IL do disco e "provam" que o patch funciona, enquanto o app 32-bit usa a
+> imagem nativa e não muda nada — os dois mundos nunca concordam. Para detectar: altere uma
+> constante fácil de observar num manager que já funciona e veja se o app reage. Se não reagir,
+> é NGen. O caso completo está em [CLAUDE.md](CLAUDE.md).
 
-O prefixo tem imagens nativas pré-compiladas em
-`drive_c/windows/assembly/NativeImages_v4.0.30319_32/`, e `SimHub.Plugins` é uma delas
-(26 MB). O SimHub roda **32-bit** e executa essa imagem nativa: **o IL da DLL é ignorado**.
-Todo patch em `SimHub.Plugins.dll` é um **no-op no app** até a imagem ser removida.
-
-O que tornou isso quase invisível: sondas de diagnóstico compiladas para **x64** JIT-am o IL
-do disco e **veem o patch funcionando**, enquanto o app 32-bit usa a imagem nativa e não vê
-nada. Os dois mundos nunca concordam, e cada medição "prova" o oposto da outra.
-
-**Como detectar em qualquer patch:** altere uma constante fácil de observar (por exemplo, o
-`pid` no construtor de um manager que já funciona) e veja se o app muda de comportamento. Se
-não mudar, é NGen. Foi assim que se fechou o diagnóstico: patcheei o construtor do
-`PokornyiMCPButtonBoxManager` de `CB40` para `CB01` e ele **continuou conectando no
-`pid_cb40`**.
-
-> ⚠️ **Por que a falha original era totalmente silenciosa.** No IL do
-> `PokornyiDriver.GetDevice`, a linha de log `Scanning {0}, sn {1}...` vem **depois** do
-> filtro `MatchUsage`. Com o `usagePage` errado a lista sai vazia e **não há uma única linha**
-> — nem erro, nem "Scanning". Foi isso que fez o device parecer "nunca varrido".
+> ⚠️ **Por que a falha era totalmente silenciosa.** A linha de log `Scanning ...` do
+> `PokornyiDriver` vem **depois** do filtro de collection. Com o `usagePage` errado a lista sai
+> vazia e **não há uma única linha** — nem erro, nem "Scanning".
 
 ## Depois de cada update do SimHub
 
@@ -625,15 +558,11 @@ Na ordem de probabilidade:
 
 ### Entradas PnP obsoletas
 
-Um `Enum\HID\VID_xxxx&PID_xxxx*` remanescente faz a collection ser registrada mas nunca ficar
-"present", e o driver recebe `null`. Aparece como `NullReferenceException` a cada 2 s no log.
-
-Na bancada, a PDU5 chegou a ter **3** instâncias em `Enum\{HID,USB,WINEBUS}` e **3** em
-`Control\DeviceClasses` (contra 1 de cada outro device) — duas eram de uma segunda PCB, com
-outro serial. Limpar e deixar o Wine recriar deixou a árvore correta.
-
-⚠️ **Mas isso não era a causa do problema da PDU5.** Vale limpar mesmo assim; só não credite a
-correção a isso. A limpeza ainda é manual: exige editar `system.reg` com o wineserver parado.
+Um `Enum\HID\VID_xxxx&PID_xxxx*` remanescente — típico de trocar uma PCB pela mesma de outro
+serial — faz a collection ser registrada mas nunca ficar "present", e o driver recebe `null`.
+Aparece como `NullReferenceException` a cada 2 s no log. Apagar as entradas e deixar o Wine
+recriar resolve, mas a limpeza ainda é manual: exige editar `system.reg` com o wineserver
+parado.
 
 ### Sonda HID devolve lista vazia
 
