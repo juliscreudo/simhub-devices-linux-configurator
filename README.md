@@ -53,7 +53,7 @@ Validated with the hardware connected on **CachyOS** (kernel 7.1, Wine 11.15), b
 | Pokornyi MCP IgnitionBox | `0483:cb42` | LEDs + buttons (HID) | ✅ **hardware-validated** |
 | Pokornyi PDU5 | `0483:cb01` | RPM LEDs (HID) + screen | ✅ **validated** — needs step 5 |
 | Pokornyi HYP-R | `0483:cb10` | LEDs (HID) + screen | ✅ **hardware-validated** |
-| Pokornyi GTB Pro | `0483:cb11` | LEDs (HID) + screen | ✅ **LEDs validated** — screen retest pending |
+| Pokornyi GTB Pro | `0483:cb11` | LEDs (HID) + screen | ✅ **hardware-validated** |
 | Pokornyi FGT | `0483:cb15` | LEDs (HID) | ✅ **validated** — plugging it in and restarting SimHub was enough |
 | Pokornyi RALLY | `0483:cb12` | LEDs (HID) | ✅ **validated** — same, zero new steps |
 | Cube Controls AMG (AC190) | `c872:200b` | LEDs + buttons (HID) | ✅ **hardware-validated** |
@@ -104,7 +104,7 @@ wine-libusb-bridge      makes libusb work under Wine (VoCore screens)
 simhub-devices-linux    configures the devices in the Devices tab   ← this repo
 ```
 
-`tools/simhub-devices doctor` checks the whole stack in that order and tells you which layer
+`simhub-devices doctor` checks the whole stack in that order and tells you which layer
 you're stuck on.
 
 ---
@@ -121,7 +121,7 @@ you're stuck on.
 
 If all you have is a button box or a screenless wheel, **steps 1 and 2 are enough**.
 
-At any point, `tools/simhub-devices doctor` tells you where you are and what's missing.
+At any point, `simhub-devices doctor` tells you where you are and what's missing.
 
 ---
 
@@ -130,7 +130,13 @@ At any point, `tools/simhub-devices doctor` tells you where you are and what's m
 ```bash
 git clone https://github.com/juliscreudo/simhub-devices-linux.git ~/apps/simhub-devices-linux
 cd ~/apps/simhub-devices-linux
+mkdir -p ~/.local/bin && ln -s "$PWD/tools/simhub-devices" ~/.local/bin/simhub-devices
 ```
+
+The rest of this guide calls the command as `simhub-devices`, without the `tools/` prefix —
+the symlink above is what makes that work. Make sure `~/.local/bin` is on your `PATH` (most
+distros already have it there); if `simhub-devices doctor` says "command not found", run
+`export PATH="$HOME/.local/bin:$PATH"` (and add it to your `.bashrc`/`.zshrc`).
 
 ### Packages
 
@@ -194,7 +200,7 @@ If you don't have a VoCore screen, **skip this** — nothing else in the project
 Before touching anything:
 
 ```bash
-tools/simhub-devices doctor
+simhub-devices doctor
 ```
 
 It lists the known devices that are plugged in, says whether each one has access to the right
@@ -231,7 +237,7 @@ This is **the step that unlocks the HID recipe**, and for a long time I thought 
 registry. It isn't.
 
 ```bash
-tools/simhub-devices install udev --apply
+simhub-devices install udev --apply
 ```
 
 Installs `udev/70-pokornyi.rules` and `udev/70-vocore.rules`, reloads the rules and fires the
@@ -254,13 +260,13 @@ for the screen, which needs **write** access on its USB node for libusb to claim
 Verify:
 
 ```bash
-tools/simhub-devices doctor        # your device's line should say "acessivel" (accessible)
+simhub-devices doctor        # your device's line should say "acessivel" (accessible)
 ```
 
 ## Step 2 — winebus registry (HID devices)
 
 ```bash
-tools/simhub-devices install registry --apply
+simhub-devices install registry --apply
 wineserver -k                      # winebus needs to re-read it
 ```
 
@@ -315,13 +321,13 @@ through here (measured 2026-08-19), as do the Arduinos from the official wiki.
 First see what's plugged in:
 
 ```bash
-tools/simhub-devices install serial
+simhub-devices install serial
 ```
 
 Without `--dev` it just lists the available serial devices. Then:
 
 ```bash
-tools/simhub-devices install serial \
+simhub-devices install serial \
     --dev /dev/serial/by-id/usb-CONSPIT_H.AO_XXXXXXXX-if00 \
     --vid 3514 --pid 0007 --com 37 --nome 'CONSPIT H.AO' --apply
 wineserver -k
@@ -352,7 +358,7 @@ carrying that data, the match fails silently. The installer creates that node.
 Only for wheels and dashes with a screen.
 
 ```bash
-tools/simhub-devices install bridge --apply
+simhub-devices install bridge --apply
 run-simhub                              # starts the bridge and SimHub, in that order
 ```
 
@@ -383,7 +389,7 @@ libusb has it.
   bridge DLL returns an error and the screen won't connect; and a helper left dangling after
   SimHub dies keeps the interface claimed, causing `LIBUSB_ERROR_BUSY` next time. The launcher
   handles both ends. **Opening it from the Windows/Wine menu shortcut doesn't count** — it
-  launches SimHub directly, without the bridge. `tools/simhub-devices install shortcut --apply`
+  launches SimHub directly, without the bridge. `simhub-devices install shortcut --apply`
   creates a menu shortcut that goes through `run-simhub`.
 - ⚠️ If you have the `mpro_drm` kernel module loaded, **unload it** (`rmmod mpro`): with it the
   kernel claims the interface and the bridge stops seeing the device. The two cannot coexist.
@@ -395,7 +401,7 @@ Only for those three. If your wheel isn't one of them, **skip it** — but do re
 trap may exist in another manager.
 
 ```bash
-tools/simhub-devices install pdu5-leds --apply
+simhub-devices install pdu5-leds --apply
 ```
 
 The command makes **two** fixes, and **neither one alone is enough** (verified by
@@ -426,7 +432,7 @@ An update reinstalls the original `libusb-1.0.dll` **and runs `ngen` again**. Wi
 both steps, the screen and the PDU5's LEDs stop working **with no warning**:
 
 ```bash
-tools/simhub-devices post-update --apply
+simhub-devices post-update --apply
 ```
 
 ---
@@ -485,7 +491,7 @@ Find your device's driver and see what it uses:
 
 ```bash
 lsusb                              # with the device plugged in
-tools/simhub-devices doctor        # says whether it's already known and whether access is ok
+simhub-devices doctor        # says whether it's already known and whether access is ok
 ```
 
 If the VID isn't `0483` (Pokornyi), `c872` (Cube Controls / VoCore) or `3514` (Conspit), you

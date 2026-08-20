@@ -91,10 +91,10 @@ CATALOGO = {
 #    hid do CATALOGO (nao incremental) e cb?? ja cobre cb12. Terceira confirmacao de
 #    que a receita generaliza; a mais barata das tres, porque nao exigiu nenhum passo
 #    manual alem do que ja tinha sido aplicado para outro device.
-# ⚠️ cb11 (GTB Pro): LEDs conectaram na hora (quarta confirmacao). A TELA nao --
-#    mas por causa alheia ao device: SimHub aberto pelo atalho que o Wine gera
-#    sozinho, que pula o helper da ponte. Nao e' falha de receita; 'install
-#    shortcut' resolve o atalho. Tela ainda sem reteste com o helper de pe'.
+# ⚠️ cb11 (GTB Pro): LEDs conectaram na hora (quarta confirmacao). A tela so'
+#    nao conectou na primeira tentativa por causa alheia ao device (SimHub
+#    aberto pelo atalho que o Wine gera sozinho, sem o helper da ponte);
+#    reaberto pelo atalho novo ('install shortcut'), a tela conectou tambem.
 TESTADOS = {("0483","cb01"), ("0483","cb10"), ("0483","cb11"), ("0483","cb12"),
             ("0483","cb15"), ("0483","cb40"), ("0483","cb41"), ("0483","cb42"),
             ("c872","200b"), ("c872","1004")}
@@ -562,9 +562,28 @@ def instalar_atalho():
             f.write(conteudo)
         os.chmod(ATALHO_NOSSO, 0o644)
 
-    print(f"\n  {AVISO} o Wine tambem tem um atalho \"SimHub\" proprio, em")
-    print(f"  {AVISO} wine/Programs/SimHub/ — ele abre direto (sem a ponte). Os dois vao")
-    print(f"  {AVISO} aparecer no menu com o mesmo nome; use este daqui.\n")
+    # ⚠️ remove o atalho do Wine DEPOIS de ter lido o Icon= dele -- senao perde a
+    #    unica fonte pratica do icone. Nao precisa de backup: o winemenubuilder
+    #    recria esse arquivo sozinho (reinstall/update/winecfg), entao apagar aqui
+    #    e' reversivel de graca pelo proprio Wine se algum dia fizer falta.
+    if os.path.exists(ATALHO_WINE):
+        passo(f"remover o atalho duplicado do Wine: {ATALHO_WINE}")
+        if APLICAR:
+            os.remove(ATALHO_WINE)
+        print(f"\n  {INFO} o Wine pode recria-lo sozinho (reinstall/update do SimHub,")
+        print(f"  {INFO} ou so' abrir o winecfg) -- rode 'install shortcut --apply' de novo")
+        print(f"  {INFO} se ele reaparecer. 'post-update' ja' faz isso automaticamente.\n")
+    else:
+        print()
+
+    if APLICAR:
+        try:
+            subprocess.run(["update-desktop-database",
+                            os.path.expanduser("~/.local/share/applications")],
+                           capture_output=True, check=True)
+            print(f"  {INFO} cache do menu atualizado (update-desktop-database)\n")
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            pass
 
 
 def instalar_pdu5_leds():
@@ -677,11 +696,14 @@ def instalar_serial(args):
 def pos_update():
     """O que um update do SimHub desfaz, em silencio, toda vez."""
     print("\n== pos-update do SimHub ==\n")
-    print(f"  {INFO} um update reinstala a libusb-1.0.dll e roda ngen de novo.")
-    print(f"  {INFO} sem os dois passos abaixo, a tela e a PDU5 param sem avisar.\n")
+    print(f"  {INFO} um update reinstala a libusb-1.0.dll e roda ngen de novo, e o")
+    print(f"  {INFO} winemenubuilder costuma recriar o atalho proprio do Wine.")
+    print(f"  {INFO} sem os passos abaixo, a tela, a PDU5 e o atalho voltam a falhar\n"
+          f"  {INFO} sem avisar.\n")
     exigir_simhub_parado("post-update")
     instalar_ponte()
     instalar_pdu5_leds()
+    instalar_atalho()
 
 
 def main():

@@ -610,7 +610,7 @@ revisão de firmware.
 | Cube Controls AMG | `c872:200c` | não | `CubeControlsAMGLedsManager` (HID) | não testado — receita 1, mesmo driver do AC190 |
 | Pokornyi HYP-R | `0483:cb10` | **sim** | composite: LEDs (HID) + tela | ✅ **LEDs e tela conectam** (2026-08-18) |
 | Pokornyi F499 | `0483:cb14` | **sim** | composite: LEDs (HID) + tela | não testado |
-| Pokornyi GTB Pro | `0483:cb11` | **sim** | composite: LEDs (HID) + tela | ✅ **LEDs conectam**; tela pendente (2026-08-19) |
+| Pokornyi GTB Pro | `0483:cb11` | **sim** | composite: LEDs (HID) + tela | ✅ **LEDs e tela conectam** (2026-08-19) |
 | Pokornyi PDU7 | `0483:cb02` | **sim** | composite: LEDs (HID) + tela | não testado |
 
 ⚠️ Outra unidade do mesmo modelo pode diferir — confirme com `lsusb` ao plugar.
@@ -644,8 +644,9 @@ reaparecendo, só que agora há um alternativo correto ao lado. Não tentei supr
 (precisaria de um `Hidden=true` casando o Desktop ID exato dele,
 `wine-Programs-SimHub-SimHub.desktop`, e voltaria a cada regeneração de qualquer forma).
 
-**Tela do GTB Pro ainda não confirmada com o helper de pé** — falta reabrir pelo atalho novo
-(ou `run-simhub` direto) e checar a aba Devices de novo.
+**Confirmado**: reaberto pelo atalho novo (`install shortcut`), a tela do GTB Pro conectou
+junto com os LEDs. Fecha o ciclo: o bloqueio nunca foi do device, foi só o caminho que abria
+o SimHub sem subir o helper primeiro.
 
 ## Pokornyi RALLY — a confirmação mais barata das três
 
