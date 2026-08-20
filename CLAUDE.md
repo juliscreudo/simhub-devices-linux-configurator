@@ -29,6 +29,13 @@ supomos.
   tela VoCore funcionar, e serve a qualquer app sob Wine que use a API síncrona da libusb
   (no SimHub: VoCore ✅ provado, e também AX206, Conspit e SimLab, que passam pela mesma
   `SimHub.LibUsbNative.dll`). Saiu deste repo porque aqui é análise; lá é produto.
+⚠️ **A ponte é PRÉ-REQUISITO deste projeto, não submodule.** `tools/simhub-devices install
+bridge` a procura em `~/apps/wine-libusb-bridge` (ou em `SIMHUB_PONTE`) e roda `make` se
+faltar binário. Não vira submodule de propósito: ela serve qualquer app Windows sob Wine com
+libusb síncrona, e pendurá-la num repo de sim racing inverteria esse desenho. ⚠️ Ela ainda
+**não tem remote** — publicar é o passo que falta para o pré-requisito ser instalável por
+terceiros.
+
 - `~/apps/linux-simracing-utils/` — **de terceiro** (srounce), instalador de SimHub/CrewChief
   no Linux + Winecarte. É o prefixo onde o SimHub roda: `~/apps/linux-simracing-utils/pfx`.
   Candidato natural a receber as correções daqui como contribuição upstream.

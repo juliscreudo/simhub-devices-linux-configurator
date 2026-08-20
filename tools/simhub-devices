@@ -12,6 +12,11 @@
 
 ⚠️ TUDO E' DRY-RUN por padrao. Passe --apply para agir.
 
+PRE-REQUISITO (so' para as telas VoCore): o repo wine-libusb-bridge, esperado em
+~/apps/wine-libusb-bridge ou onde SIMHUB_PONTE apontar. Nao e' submodule de
+proposito: a ponte serve qualquer app Windows sob Wine que use a libusb sincrona,
+nao so' o SimHub. `install bridge` compila (make) se os binarios faltarem.
+
 Por que os subcomandos sao ACOES e nao modelos de volante: nao ha nada por modelo
 para selecionar. UMA regra udev (`0483:cb??`) cobre TODOS os Pokornyi, as chaves de
 registro sao globais ao prefixo, e a tela e' agnostica de modelo (toda VoCore e'
@@ -185,7 +190,11 @@ def doctor():
 
 APLICAR = False          # ⚠️ dry-run por padrao; --apply liga
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PONTE = os.path.expanduser("~/apps/wine-libusb-bridge")
+# ⚠️ PRE-REQUISITO, nao submodule. A ponte e' produto generico (serve qualquer app
+#    Windows sob Wine com libusb sincrona), entao pendura-la como submodule de um
+#    repo de sim racing inverteria o desenho. Caminho configuravel por env.
+PONTE = os.path.expanduser(os.environ.get("SIMHUB_PONTE", "~/apps/wine-libusb-bridge"))
+PONTE_URL = ""   # preencher quando o repo for publicado
 NGEN = os.path.join(PFX, "drive_c/windows/assembly/NativeImages_v4.0.30319_32")
 
 
@@ -315,11 +324,25 @@ def instalar_registro():
 
 def instalar_ponte():
     print("\n== ponte libusb (telas VoCore) ==\n")
-    exigir_simhub_parado("install bridge")
+    # ⚠️ validar o pre-requisito ANTES do guard: descobrir que falta a ponte nao
+    #    deveria exigir fechar o SimHub.
     dll_origem = os.path.join(PONTE, "libusb-1.0.dll")
-    if not os.path.exists(dll_origem):
-        sys.exit(f"{ERRO} nao achei {dll_origem}\n"
-                 f"   clone e compile ~/apps/wine-libusb-bridge primeiro")
+    if not os.path.isdir(PONTE):
+        msg = [f"{ERRO} pre-requisito ausente: wine-libusb-bridge nao esta em {PONTE}",
+               "   defina SIMHUB_PONTE=<caminho> ou clone o repo ali."]
+        if PONTE_URL:
+            msg.append(f"   git clone {PONTE_URL} {PONTE}")
+        sys.exit("\n".join(msg))
+    if not os.path.exists(dll_origem) or not os.path.exists(os.path.join(PONTE, "libusb-bridge-helper")):
+        passo(f"compilar a ponte: make -C {PONTE}")
+        if APLICAR:
+            r = subprocess.run(["make", "-C", PONTE], capture_output=True, text=True)
+            if r.returncode != 0:
+                sys.exit(f"{ERRO} 'make' falhou em {PONTE}:\n{r.stderr[-800:]}")
+        elif not os.path.exists(dll_origem):
+            print(f"  {AVISO} a ponte ainda nao foi compilada; --apply roda o make")
+            return
+    exigir_simhub_parado("install bridge")
     dll_alvo = os.path.join(SH_DIR, "libusb-1.0.dll")
     orig = dll_alvo + ".orig"
     if os.path.exists(dll_alvo) and not os.path.exists(orig):
