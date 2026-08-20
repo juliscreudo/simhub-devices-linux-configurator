@@ -605,6 +605,7 @@ revisão de firmware.
 | Pokornyi PDU5 | `0483:cb01` | **sim** | composite: LEDs (HID) + tela | ✅ **LEDs e tela conectam** (patch + NGen removido) |
 | tela da PDU5 | `c872:1004` | — | `BitmapDisplayDevice` via libusb | ✅ **conecta e mostra o dash** (receita 3: ponte libusb) — MPRO D500FPC931A-A, 854×480 |
 | Pokornyi FGT | `0483:cb15` | não | `PokornyiFGTManager` (HID) | ✅ **conecta** — plugar e reabrir bastou (2026-08-19) |
+| Pokornyi RALLY | `0483:cb12` | não | `PokornyiRallyManager` (HID) | ✅ **conecta** — plugar e reabrir bastou, zero passo novo (2026-08-19) |
 | Cube Controls AC190 | `c872:200b` | não | `CubeControlsAC190LedsManager` (HID) | ✅ **conecta** — receita 1 pura, sem usagePage errado (2026-08-19) |
 | Cube Controls AMG | `c872:200c` | não | `CubeControlsAMGLedsManager` (HID) | não testado — receita 1, mesmo driver do AC190 |
 | Pokornyi HYP-R | `0483:cb10` | **sim** | composite: LEDs (HID) + tela | ✅ **LEDs e tela conectam** (2026-08-18) |
@@ -619,6 +620,20 @@ o `usagePage 0xFF` é **por manager**, não por marca. A PDU5 falha porque o des
 uma collection Joystick **vazia** (nenhum botão, nenhum eixo — é um dash, não um controle).
 Um HYP-R ou F499, que têm botões de verdade, provavelmente têm descriptor como o dos MCP —
 **meça com `hidenum` e com `ildump.py` no manager do modelo antes de concluir**.
+
+## Pokornyi RALLY — a confirmação mais barata das três
+
+Validado em 2026-08-19, no mesmo dia do AC190, e mais rápido de fechar: **nenhum passo
+novo foi necessário**, nem sequer para diagnosticar. `0483:cb12` já estava no `CATALOGO`
+desde o início (junto com todos os outros PIDs Pokornyi do catálogo), e `install registry
+--apply` escreve a lista `EnableHidraw` **inteira** a partir do `CATALOGO`, não
+incrementalmente — então o RALLY já tinha entrada no registro desde a primeira vez que o
+comando rodou, muito antes de ele ser plugado. A regra `udev/70-pokornyi.rules` (`cb??`)
+também já cobria. Bastou plugar e reabrir o SimHub.
+
+É a terceira confirmação de que a receita generaliza (depois do FGT e do AC190), e a mais
+informativa sobre **como** ela generaliza: a cobertura não é "por device testado", é "por
+faixa de PID cadastrada" — um device pode funcionar antes mesmo de alguém pensar nele.
 
 ## Cube Controls AC190 — validado em 2026-08-19, e a lacuna era simples
 

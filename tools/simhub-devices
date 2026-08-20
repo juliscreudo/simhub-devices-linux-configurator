@@ -85,8 +85,14 @@ CATALOGO = {
 #    padrao dos MCP, SEM o problema de usagePage da PDU5. So' faltava udev + registro.
 #    ✅ validado com hardware em 2026-08-19: install udev + install registry --apply
 #    bastaram, sem patch de IL nem NGen.
-TESTADOS = {("0483","cb01"), ("0483","cb10"), ("0483","cb15"), ("0483","cb40"),
-            ("0483","cb41"), ("0483","cb42"), ("c872","200b"), ("c872","1004")}
+# ⚠️ cb12 (RALLY) conectou em 2026-08-19 SEM NENHUM passo novo -- nem udev nem CATALOGO
+#    precisaram de edicao, porque install registry --apply ja escreve a lista CHEIA de
+#    hid do CATALOGO (nao incremental) e cb?? ja cobre cb12. Terceira confirmacao de
+#    que a receita generaliza; a mais barata das tres, porque nao exigiu nenhum passo
+#    manual alem do que ja tinha sido aplicado para outro device.
+TESTADOS = {("0483","cb01"), ("0483","cb10"), ("0483","cb12"), ("0483","cb15"),
+            ("0483","cb40"), ("0483","cb41"), ("0483","cb42"),
+            ("c872","200b"), ("c872","1004")}
 
 
 def usb_presentes():

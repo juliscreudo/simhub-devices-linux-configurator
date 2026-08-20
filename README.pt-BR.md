@@ -54,7 +54,8 @@ Validado com o hardware conectado em **CachyOS** (kernel 7.1, Wine 11.15), entre
 | Pokornyi PDU5 | `0483:cb01` | LEDs RPM (HID) + tela | ✅ **validado** — precisa do passo 5 |
 | Pokornyi HYP-R | `0483:cb10` | LEDs (HID) + tela | ✅ **validado com hardware** |
 | Pokornyi FGT | `0483:cb15` | LEDs (HID) | ✅ **validado** — plugar e reabrir o SimHub bastou |
-| Cube Controls AC190 | `c872:200b` | LEDs + botões (HID) | ✅ **validado com hardware** |
+| Pokornyi RALLY | `0483:cb12` | LEDs (HID) | ✅ **validado** — idem, zero passo novo |
+| Cube Controls AMG (AC190) | `c872:200b` | LEDs + botões (HID) | ✅ **validado com hardware** |
 | Tela VoCore | `c872:1004` | dash + **toque** (libusb) | ✅ **validado** — 854×480, via a ponte |
 
 O **FGT** é a evidência de que a receita generaliza: nunca tinha sido ligado nesta bancada,
@@ -62,8 +63,8 @@ e bastou plugar e reabrir o SimHub — sem nenhuma configuração específica pa
 está em [CLAUDE.md](CLAUDE.md).
 
 E o que a receita **deveria** cobrir, sem ninguém ter testado: os demais Pokornyi (PDU7, LED
-Brows, GTB Pro, RALLY, LMPH, F499, HYP-R PRO, LMP PRO V2, GTE PRO V3), o restante da Cube
-Controls (AMG, F-PRO, GT-PRO V2, Astra) e os demais volantes Conspit (300GT, MAX 01, 310 APEX,
+Brows, GTB Pro, LMPH, F499, HYP-R PRO, LMP PRO V2, GTE PRO V3), o restante da Cube Controls
+(F-PRO, GT-PRO V2, Astra) e os demais volantes Conspit (300GT, MAX 01, 310 APEX,
 290 GP, PW1, CSD). São **mais de 200 devices** no catálogo do SimHub; os três caminhos abaixo
 cobrem a grande maioria.
 
