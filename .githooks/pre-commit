@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+# Checagem antes do commit: vazamento de dado pessoal primeiro, sintaxe depois.
+#
+# ⚠️ A ordem nao e' estetica. O erro de sintaxe voce descobre na proxima vez que
+#    rodar o script; o dado pessoal, depois de publicado, fica em cache no GitHub
+#    e em cada clone -- reescrever historico so' e' barato ANTES do push.
+#
+# Instalar (uma vez, por clone):
+#     git config core.hooksPath .githooks
+#
+# Escapatoria: `git commit --no-verify`. Use com consciencia -- ele pula TUDO,
+# inclusive a checagem de autoria, que e' a que ja falhou de verdade uma vez.
+
+falhas=0
+erro() { printf '\033[31m  x %s\033[0m\n' "$*"; falhas=$((falhas + 1)); }
+ok()   { printf '\033[32m  . %s\033[0m\n' "$*"; }
+info() { printf '    %s\n' "$*"; }
+
+# Arquivos que entram NESTE commit (A/C/M; renomeacao e delecao nao tem conteudo novo).
+mapfile -d '' -t ARQS < <(git diff --cached --name-only --diff-filter=ACM -z)
+[ ${#ARQS[@]} -eq 0 ] && exit 0
+
+# Conteudo staged, nao o do disco: sao coisas diferentes quando ha `git add -p`
+# ou edicao depois do add, e o que vai pro commit e' este.
+staged() { git show ":$1" 2>/dev/null; }
+
+# So' as linhas ADICIONADAS. Escanear o arquivo inteiro faria um vazamento antigo
+# travar todo commit que tocasse o arquivo, ate' em linha nao relacionada.
+#
+# Linha com `pre-commit-ok` e' ignorada pelas checagens de conteudo. Existe porque
+# este proprio arquivo contem os padroes que procura -- e isentar o hook inteiro
+# criaria um ponto cego onde e' mais facil esconder coisa. Marcador explicito, por
+# linha, e' o que um scanner de segredo serio faz. Use com parcimonia.
+adicionadas() {
+    git diff --cached -U0 -- "$1" | grep '^+' | grep -v '^+++' | grep -v 'pre-commit-ok'
+}
+
+echo "== vazamento =="
+
+# --- 1. autoria -----------------------------------------------------------
+# O vetor que escapou de verdade: nao estava em arquivo nenhum, estava na
+# autoria. `git log` limpo no working tree nao prova nada.
+email=$(git var GIT_AUTHOR_IDENT | sed -n 's/.*<\(.*\)>.*/\1/p')
+padrao_ok=$(git config hooks.allowedEmail || echo '@users\.noreply\.github\.com$')
+if [[ ! "$email" =~ $padrao_ok ]]; then
+    erro "autoria do commit: <$email>"
+    info "esperado algo casando com: $padrao_ok"
+    info "corrija:  git config user.email 'SEU_USER@users.noreply.github.com'"
+    info "(para permitir outro padrao: git config hooks.allowedEmail '<regex>')"
+else
+    ok "autoria <$email>"
+fi
+
+# --- 2. conteudo ----------------------------------------------------------
+# ⚠️ VID/PID e modelo de device NAO entram aqui de proposito: sao publicos do
+#    fabricante e sao justamente o dado tecnico deste repo.
+achou_conteudo=0
+for f in "${ARQS[@]}"; do
+    linhas=$(adicionadas "$f") || continue
+    [ -z "$linhas" ] && continue
+
+    # ⚠️ NAO use `if hit=$(... | head -3)`: o status da atribuicao e' o do HEAD,
+    #    que e' 0 sempre -- a checagem dispararia em todo commit, com hit vazio.
+    #    Testar o conteudo de $hit e' o unico jeito correto aqui.
+    flag() {                       # flag <mensagem> <linhas-encontradas>
+        [ -z "$2" ] && return 1
+        erro "$f: $1"
+        sed 's/^/      /' <<<"$2"
+        achou_conteudo=1
+    }
+
+    # caminho absoluto com o usuario dentro; o repo usa ~/ ou expanduser
+    flag "caminho absoluto com usuario" \
+        "$(grep -nE '/home/[a-z_][a-z0-9_-]*' <<<"$linhas" | head -3)"
+
+    # e-mail; noreply de plataforma e' aceito (trailer de co-autoria, git config)
+    flag "e-mail no conteudo" \
+        "$(grep -nEi '[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}' <<<"$linhas" \
+           | grep -viE 'noreply|example\.(com|org)|@users\.' | head -3)"
+
+    # serial embutido no by-id. Placeholder passa: XXXX, <ALGO>, ..., SEU_/YOUR_
+    flag "/dev/serial/by-id/ com serial aparentemente real" \
+        "$(grep -nE '/dev/serial/by-id/usb-[^[:space:]]+' <<<"$linhas" `# pre-commit-ok` \
+           | grep -vE 'X{4,}|<[^>]*>|\.\.\.|SEU_|YOUR_|SERIAL' | head -3)" \
+        && info "serial e' credencial de garantia -- troque por <SERIAL>, nao apague o exemplo"
+
+    # instance ID do PnP: o trecho depois de VID_xxxx&PID_xxxx\ carrega o serial
+    flag "instance ID PnP nao mascarado" \
+        "$(grep -nE 'VID_[0-9A-Fa-f]{4}&PID_[0-9A-Fa-f]{4}\\[A-Za-z0-9&]{6,}' <<<"$linhas" \
+           | grep -vE 'X{4,}|<[^>]*>|INSTANCIA|SERIAL' | head -3)"
+
+    flag "parece endereco MAC" \
+        "$(grep -nE '\b([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}\b' <<<"$linhas" | head -3)"
+done
+[ $achou_conteudo -eq 0 ] && ok "nenhum dado pessoal nas linhas adicionadas"
+
+echo "== sintaxe =="
+
+# Um arquivo e' Python/Bash por extensao OU por shebang: `tools/simhub-devices`
+# e `tools/run-simhub` nao tem extensao e sao os dois mais editados do repo.
+tipo_de() {
+    case "$1" in
+        *.py) echo python; return ;;
+        *.c)  echo c;      return ;;
+    esac
+    case "$(staged "$1" | head -1)" in
+        *python*) echo python ;;
+        *bash*|*/sh)  echo bash ;;
+        *)        echo outro ;;
+    esac
+}
+
+checou=0
+for f in "${ARQS[@]}"; do
+    case "$(tipo_de "$f")" in
+        python)
+            if saida=$(staged "$f" | python3 -c \
+                'import sys; compile(sys.stdin.read(), sys.argv[1], "exec")' "$f" 2>&1); then
+                ok "python  $f"
+            else
+                erro "python  $f"; sed 's/^/      /' <<<"$saida"
+            fi
+            checou=1 ;;
+        bash)
+            if saida=$(staged "$f" | bash -n 2>&1); then
+                ok "bash    $f"
+            else
+                erro "bash    $f"; sed 's/^/      /' <<<"$saida"
+            fi
+            checou=1 ;;
+        c)
+            # As sondas sao Windows (hid.h/setupapi.h): so' o mingw as compila.
+            # Sem mingw, pular -- e' dependencia opcional no README, e hook que
+            # exige toolchain opcional vira hook que todo mundo desliga.
+            cc=$(command -v x86_64-w64-mingw32-gcc || true)
+            if [ -z "$cc" ]; then
+                info "-  c      $f (mingw ausente, pulado)"
+            else
+                tmp=$(mktemp --suffix=.c)
+                staged "$f" >"$tmp"
+                if saida=$("$cc" -fsyntax-only "$tmp" 2>&1); then
+                    ok "c       $f"
+                else
+                    erro "c       $f"; sed "s|$tmp|$f|g; s/^/      /" <<<"$saida"
+                fi
+                rm -f "$tmp"
+            fi
+            checou=1 ;;
+    esac
+
+    # Shebang sem bit de execucao: o README manda chamar tools/simhub-devices
+    # direto e por symlink em ~/.local/bin -- sem o bit, quebra so' na mao do usuario.
+    if [[ "$(staged "$f" | head -c 2)" == '#!' ]]; then
+        modo=$(git ls-files --stage -- "$f" | cut -d' ' -f1)
+        [ "$modo" = 100755 ] || erro "$f tem shebang mas nao esta executavel (git update-index --chmod=+x '$f')"
+    fi
+done
+[ $checou -eq 0 ] && ok "nenhum arquivo de codigo neste commit"
+
+echo
+if [ $falhas -gt 0 ]; then
+    printf '\033[31mcommit abortado: %d checagem(ns) falhou/falharam\033[0m\n' "$falhas"
+    exit 1
+fi
+printf '\033[32mok\033[0m\n'

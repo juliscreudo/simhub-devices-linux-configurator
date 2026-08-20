@@ -145,6 +145,19 @@ cd ~/apps/simhub-devices-linux-configurator
 mkdir -p ~/.local/bin && ln -s "$PWD/tools/simhub-devices" ~/.local/bin/simhub-devices
 ```
 
+> If you're going to **contribute**, enable the pre-commit hook (once per clone —
+> `core.hooksPath` isn't versioned):
+>
+> ```bash
+> git config core.hooksPath .githooks
+> ```
+>
+> It checks syntax (Python, Bash, C) and blocks personal data in added lines: hardware
+> serials, `/home/<user>` paths, e-mails, MACs. ⚠️ A wheel/base serial is a **warranty
+> credential**, not metadata — mask it as `<SERIAL>` rather than deleting the example.
+> VID/PID and device models pass on purpose: they're public vendor data and the technical
+> substance of this repo.
+
 The rest of this guide calls the command as `simhub-devices`, without the `tools/` prefix —
 the symlink above is what makes that work. Make sure `~/.local/bin` is on your `PATH` (most
 distros already have it there); if `simhub-devices doctor` says "command not found", run
