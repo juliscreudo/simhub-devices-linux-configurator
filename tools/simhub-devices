@@ -131,6 +131,48 @@ def helper_da_ponte_no_ar():
         return False
 
 
+
+# ------------------------------------------------------------------- camadas
+# ⚠️ Este projeto e' a camada de CIMA de uma pilha. Cada camada so' faz sentido
+#    com a de baixo pronta, e diagnosticar fora de ordem manda a pessoa consertar
+#    a coisa errada:
+#
+#      linux-simracing-utils  -> instala o SimHub e cria o prefixo Wine
+#             |
+#      wine-libusb-bridge     -> faz a libusb funcionar sob Wine (telas VoCore)
+#             |
+#      simhub-devices-linux   -> configura os devices na aba Devices  (aqui)
+
+def checar_camadas():
+    print("\n== camadas (cada uma depende da de baixo) ==\n")
+    lsu = os.path.expanduser(os.environ.get("LSU", "~/apps/linux-simracing-utils"))
+    wrapper = os.path.join(lsu, "bin", "lsu-launch-wrapper")
+
+    ok_lsu = os.path.isdir(lsu) and os.path.exists(wrapper)
+    print(f"  {OK if ok_lsu else ERRO} 1. linux-simracing-utils  {lsu}")
+    if not ok_lsu:
+        print(f"       instala o SimHub e cria o prefixo. Sem ele nao ha o que configurar.")
+    else:
+        print(f"       {INFO} lsu-launch-wrapper presente (sobe o winehub = telemetria)")
+
+    ok_pfx = os.path.isdir(SH_DIR)
+    print(f"  {OK if ok_pfx else ERRO} 2. SimHub no prefixo      {SH_DIR}")
+
+    ponte = ponte_dir()
+    tem = os.path.isdir(ponte)
+    compilada = tem and os.path.exists(os.path.join(ponte, "libusb-1.0.dll"))
+    versao = open(ARQ_VERSAO).read().strip() if os.path.exists(ARQ_VERSAO) else "copia local"
+    print(f"  {OK if compilada else (AVISO if tem else ERRO)} 3. wine-libusb-bridge     {ponte}  ({versao})")
+    if not tem:
+        print(f"       so' necessaria para as telas VoCore; 'install bridge' resolve.")
+    elif not compilada:
+        print(f"       presente mas nao compilada — 'install bridge --apply' roda o make.")
+
+    instalada = os.path.exists(os.path.join(SH_DIR, "libusb-1.0.dll.orig"))
+    print(f"  {OK if instalada else INFO} 4. ponte instalada no SimHub"
+          f"  {'sim' if instalada else 'nao (a DLL original ainda esta la)'}")
+
+
 def doctor():
     print("\n== devices da bancada ==\n")
     vistos = 0
@@ -168,7 +210,9 @@ def doctor():
     if not vistos:
         print("  nenhum device conhecido plugado.\n")
 
-    print("== prefixo do SimHub ==\n")
+    checar_camadas()
+
+    print("\n== prefixo do SimHub ==\n")
     print(f"  {OK if os.path.isdir(SH_DIR) else ERRO} SimHub em {SH_DIR}")
 
     # ⚠️ imagem nativa engole patch de IL: o app roda 32-bit e ignora a DLL
@@ -190,11 +234,76 @@ def doctor():
 
 APLICAR = False          # ⚠️ dry-run por padrao; --apply liga
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# ⚠️ PRE-REQUISITO, nao submodule. A ponte e' produto generico (serve qualquer app
-#    Windows sob Wine com libusb sincrona), entao pendura-la como submodule de um
-#    repo de sim racing inverteria o desenho. Caminho configuravel por env.
-PONTE = os.path.expanduser(os.environ.get("SIMHUB_PONTE", "~/apps/wine-libusb-bridge"))
-PONTE_URL = ""   # preencher quando o repo for publicado
+# ---- dependencia externa: wine-libusb-bridge -------------------------------
+# Mesmo modelo do linux-simracing-utils: NAO e' submodule e nao e' versionada
+# junto. O instalador traz a release fixada para um diretorio ignorado e anota a
+# versao num arquivo. A ponte e' produto generico (serve qualquer app Windows sob
+# Wine com libusb sincrona); pendura-la dentro de um repo de sim racing inverteria
+# o desenho que motivou separar as duas.
+PONTE_REPO = os.environ.get("SIMHUB_PONTE_REPO", "")   # "<owner>/<repo>"; vazio = nao publicada
+PONTE_VERSAO = os.environ.get("SIMHUB_PONTE_VERSION", "")   # vazio = ultima release
+VENDOR = os.path.join(REPO, "vendor", "wine-libusb-bridge")
+ARQ_VERSAO = os.path.join(REPO, ".ponte-version")
+
+
+def ponte_dir():
+    """Onde a ponte esta, em ordem de precedencia.
+
+    1. SIMHUB_PONTE — override explicito
+    2. vendor/ — o que o instalador baixou
+    3. ~/apps/wine-libusb-bridge — copia de desenvolvimento (o caso do autor
+       enquanto o repo da ponte nao tem remote)
+    """
+    env = os.environ.get("SIMHUB_PONTE")
+    if env:
+        return os.path.expanduser(env)
+    if os.path.isdir(VENDOR):
+        return VENDOR
+    return os.path.expanduser("~/apps/wine-libusb-bridge")
+
+
+def ponte_baixar():
+    """Busca a release fixada do GitHub para vendor/. Devolve True se trouxe algo.
+
+    ⚠️ Enquanto o repo da ponte nao for publicado isto nao tem o que buscar, e o
+    fallback e' a copia local de desenvolvimento."""
+    if not PONTE_REPO:
+        print(f"  {INFO} a ponte ainda nao tem repo publicado; usando copia local")
+        return False
+    import json
+    import urllib.error
+    import urllib.request
+    api = f"https://api.github.com/repos/{PONTE_REPO}/releases/"
+    api += f"tags/{PONTE_VERSAO}" if PONTE_VERSAO else "latest"
+    passo(f"buscar release da ponte: {api}")
+    if not APLICAR:
+        return False
+    try:
+        with urllib.request.urlopen(api, timeout=15) as r:
+            rel = json.load(r)
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as e:
+        print(f"  {AVISO} nao consegui buscar a release ({e}) — usando copia local")
+        return False
+    tag = rel.get("tag_name", "?")
+    fonte = rel.get("tarball_url")
+    if not fonte:
+        print(f"  {AVISO} release {tag} sem tarball — usando copia local")
+        return False
+    import io
+    import tarfile
+    with urllib.request.urlopen(fonte, timeout=60) as r:
+        dados = r.read()
+    os.makedirs(os.path.dirname(VENDOR), exist_ok=True)
+    import shutil
+    if os.path.isdir(VENDOR):
+        shutil.rmtree(VENDOR)
+    with tarfile.open(fileobj=io.BytesIO(dados), mode="r:gz") as t:
+        raiz = t.getnames()[0].split("/")[0]
+        t.extractall(os.path.dirname(VENDOR), filter="data")
+        os.rename(os.path.join(os.path.dirname(VENDOR), raiz), VENDOR)
+    open(ARQ_VERSAO, "w").write(tag + "\n")
+    print(f"  {OK} ponte {tag} em vendor/")
+    return True
 NGEN = os.path.join(PFX, "drive_c/windows/assembly/NativeImages_v4.0.30319_32")
 
 
@@ -326,19 +435,23 @@ def instalar_ponte():
     print("\n== ponte libusb (telas VoCore) ==\n")
     # ⚠️ validar o pre-requisito ANTES do guard: descobrir que falta a ponte nao
     #    deveria exigir fechar o SimHub.
-    dll_origem = os.path.join(PONTE, "libusb-1.0.dll")
-    if not os.path.isdir(PONTE):
-        msg = [f"{ERRO} pre-requisito ausente: wine-libusb-bridge nao esta em {PONTE}",
-               "   defina SIMHUB_PONTE=<caminho> ou clone o repo ali."]
-        if PONTE_URL:
-            msg.append(f"   git clone {PONTE_URL} {PONTE}")
-        sys.exit("\n".join(msg))
-    if not os.path.exists(dll_origem) or not os.path.exists(os.path.join(PONTE, "libusb-bridge-helper")):
-        passo(f"compilar a ponte: make -C {PONTE}")
+    ponte = ponte_dir()
+    if not os.path.isdir(ponte):
+        ponte_baixar()
+        ponte = ponte_dir()
+    if not os.path.isdir(ponte):
+        sys.exit(f"{ERRO} wine-libusb-bridge nao encontrada.\n"
+                 f"   procurei em: $SIMHUB_PONTE, {VENDOR}, ~/apps/wine-libusb-bridge\n"
+                 f"   com o repo publicado, 'install bridge --apply' baixa sozinho.")
+    versao = open(ARQ_VERSAO).read().strip() if os.path.exists(ARQ_VERSAO) else "copia local"
+    print(f"  {INFO} ponte: {ponte}  ({versao})")
+    dll_origem = os.path.join(ponte, "libusb-1.0.dll")
+    if not os.path.exists(dll_origem) or not os.path.exists(os.path.join(ponte, "libusb-bridge-helper")):
+        passo(f"compilar a ponte: make -C {ponte}")
         if APLICAR:
-            r = subprocess.run(["make", "-C", PONTE], capture_output=True, text=True)
+            r = subprocess.run(["make", "-C", ponte], capture_output=True, text=True)
             if r.returncode != 0:
-                sys.exit(f"{ERRO} 'make' falhou em {PONTE}:\n{r.stderr[-800:]}")
+                sys.exit(f"{ERRO} 'make' falhou em {ponte}:\n{r.stderr[-800:]}")
         elif not os.path.exists(dll_origem):
             print(f"  {AVISO} a ponte ainda nao foi compilada; --apply roda o make")
             return

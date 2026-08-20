@@ -4,3 +4,10 @@ venv/
 *.exe
 *.o
 *.txt.bak
+
+# dependencias buscadas pelo instalador — nunca versionadas.
+# Mesmo padrao do linux-simracing-utils: o install traz a release fixada para
+# dentro de um diretorio ignorado, e um arquivo .<dep>-version registra o que
+# esta la'.
+vendor/
+.ponte-version

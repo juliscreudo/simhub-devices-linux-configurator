@@ -29,12 +29,30 @@ supomos.
   tela VoCore funcionar, e serve a qualquer app sob Wine que use a API síncrona da libusb
   (no SimHub: VoCore ✅ provado, e também AX206, Conspit e SimLab, que passam pela mesma
   `SimHub.LibUsbNative.dll`). Saiu deste repo porque aqui é análise; lá é produto.
-⚠️ **A ponte é PRÉ-REQUISITO deste projeto, não submodule.** `tools/simhub-devices install
-bridge` a procura em `~/apps/wine-libusb-bridge` (ou em `SIMHUB_PONTE`) e roda `make` se
-faltar binário. Não vira submodule de propósito: ela serve qualquer app Windows sob Wine com
-libusb síncrona, e pendurá-la num repo de sim racing inverteria esse desenho. ⚠️ Ela ainda
-**não tem remote** — publicar é o passo que falta para o pré-requisito ser instalável por
-terceiros.
+### A pilha de camadas
+
+Este projeto é a camada de cima. Cada uma só faz sentido com a de baixo pronta, e
+diagnosticar fora de ordem manda a pessoa consertar a coisa errada:
+
+```
+linux-simracing-utils   instala o SimHub e cria o prefixo Wine
+       ↓
+wine-libusb-bridge      faz a libusb funcionar sob Wine (telas VoCore)
+       ↓
+simhub-devices-linux    configura os devices na aba Devices        ← aqui
+```
+
+`tools/simhub-devices doctor` checa a pilha inteira nessa ordem.
+
+⚠️ **A ponte é dependência de camada, não submodule** — mesmo modelo que o
+`linux-simracing-utils` usa para o Winecarte: o instalador traz a release fixada para um
+diretório **gitignorado** (`vendor/`) e anota a tag em `.ponte-version`; nada é versionado
+junto. Precedência de busca: `$SIMHUB_PONTE` → `vendor/` → `~/apps/wine-libusb-bridge`
+(cópia de desenvolvimento). `SIMHUB_PONTE_VERSION` fixa uma tag, como `LSU_WINECARTE_VERSION`
+faz lá.
+
+⚠️ A ponte **ainda não tem remote**, então `SIMHUB_PONTE_REPO` está vazio e o instalador cai
+na cópia local. Publicá-la é o passo que falta para a pilha ser instalável por terceiros.
 
 - `~/apps/linux-simracing-utils/` — **de terceiro** (srounce), instalador de SimHub/CrewChief
   no Linux + Winecarte. É o prefixo onde o SimHub roda: `~/apps/linux-simracing-utils/pfx`.
