@@ -113,7 +113,7 @@ linux-simracing-utils   instala o SimHub e cria o prefixo Wine
        ↓
 wine-libusb-bridge      faz a libusb funcionar sob Wine (telas VoCore)
        ↓
-simhub-devices-linux    configura os devices na aba Devices        ← este repo
+simhub-devices-linux-configurator  configura os devices na aba Devices        ← este repo
 ```
 
 `simhub-devices doctor` checa a pilha inteira nessa ordem e diz em qual camada você
@@ -140,8 +140,8 @@ Em qualquer ponto, `simhub-devices doctor` diz onde você está e o que falta.
 ## Pré-requisitos
 
 ```bash
-git clone https://github.com/juliscreudo/simhub-devices-linux.git ~/apps/simhub-devices-linux
-cd ~/apps/simhub-devices-linux
+git clone https://github.com/juliscreudo/simhub-devices-linux-configurator.git ~/apps/simhub-devices-linux-configurator
+cd ~/apps/simhub-devices-linux-configurator
 mkdir -p ~/.local/bin && ln -s "$PWD/tools/simhub-devices" ~/.local/bin/simhub-devices
 ```
 

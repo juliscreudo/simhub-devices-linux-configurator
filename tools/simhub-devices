@@ -203,7 +203,7 @@ def helper_da_ponte_no_ar():
 #             |
 #      wine-libusb-bridge     -> faz a libusb funcionar sob Wine (telas VoCore)
 #             |
-#      simhub-devices-linux   -> configura os devices na aba Devices  (aqui)
+#      simhub-devices-linux-configurator -> configura os devices na aba Devices (aqui)
 
 def checar_camadas():
     print("\n== camadas (cada uma depende da de baixo) ==\n")
@@ -685,6 +685,8 @@ def instalar_ponte():
 ATALHO_WINE = os.path.expanduser(
     "~/.local/share/applications/wine/Programs/SimHub/SimHub.desktop")
 ATALHO_NOSSO = os.path.expanduser(
+    "~/.local/share/applications/simhub-devices-linux-configurator-run-simhub.desktop")
+ATALHO_NOSSO_ANTIGO = os.path.expanduser(
     "~/.local/share/applications/simhub-devices-linux-run-simhub.desktop")
 
 
@@ -723,6 +725,13 @@ def instalar_atalho():
         with open(ATALHO_NOSSO, "w", encoding="utf-8") as f:
             f.write(conteudo)
         os.chmod(ATALHO_NOSSO, 0o644)
+
+    # renomeacao do repo (2026-08-20): o atalho antigo ficou com o nome de antes
+    # do "-configurator" -- remove pra nao conviverem os dois apontando pro mesmo run-simhub.
+    if os.path.exists(ATALHO_NOSSO_ANTIGO):
+        passo(f"remover atalho do nome antigo do repo: {ATALHO_NOSSO_ANTIGO}")
+        if APLICAR:
+            os.remove(ATALHO_NOSSO_ANTIGO)
 
     # ⚠️ remove o atalho do Wine DEPOIS de ter lido o Icon= dele -- senao perde a
     #    unica fonte pratica do icone. Nao precisa de backup: o winemenubuilder
