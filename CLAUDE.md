@@ -11,7 +11,7 @@ uma tem correção conhecida (ou diagnóstico fechado, no caso das telas).
 os três Pokornyi MCP — ButtonBox, EncoderBox, IgnitionBox (HID, receita 1) — conectam e
 respondem, com os LEDs controláveis pelo SimHub (2026-08-16). **As duas receitas estão
 validadas.** A **tela VoCore da PDU5 também funciona** desde 2026-08-18, por uma terceira
-via — a **ponte de tradução da libusb** (`tools/libusb-bridge/`, receita 3). O que sobra sem
+via — a **ponte de tradução da libusb** (`~/apps/wine-libusb-bridge`, receita 3). O que sobra sem
 solução são os **LEDs** da PDU5, por um motivo próprio e diagnosticado (seção no fim). O resto continua **inferência a partir do código do
 SimHub**, medida mas **não testada com hardware** — está marcado como tal ao longo do
 arquivo. Não apague essas marcas ao editar; elas são o que separa o que sabemos do que
@@ -447,10 +447,11 @@ as 32 chamadas (todas síncronas) a um **helper nativo** rodando contra a `libus
 Linux, que fala com o device por **usbfs**. Nenhum driver de kernel, nenhum `winusb`, nenhum
 patch no SimHub, nenhum `mpro_drm`.
 
-- Código e protocolo: `tools/libusb-bridge/` (`shim.c`, `helper.c`, `proto.h`).
+- Código e protocolo: [wine-libusb-bridge](https://github.com/juliscreudo/wine-libusb-bridge)
+  (`shim.c`, `helper.c`, `proto.h`).
 - Medido: `open` ok, `claim_interface(0)` ok, `bulk ep=0x02 len=819840 actual=819840`
   (854×480×2 = frame cheio em RGB565), `USB Path 5:2-2-4-2-4` resolvido **pela libusb real**.
-- Plano e evidência completos: `implementation-plan.md`, seções 8.1 e 8.2.
+- Log do teste decisivo e das armadilhas operacionais: `implementation-plan.md`.
 - ⚠️ **A DLL cai a cada update do SimHub** — o original fica em `libusb-1.0.dll.orig`.
 - ⚠️ **O helper precisa estar de pé ANTES do SimHub**, senão a DLL devolve erro.
 - ⚠️ **Suba o SimHub pelo `lsu-launch-wrapper`, nunca com `wine SimHubWPF.exe` direto.** Por
