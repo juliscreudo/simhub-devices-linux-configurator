@@ -16,21 +16,38 @@ known fix.
 This is **the solution I used** to get my peripherals working in the Devices tab, organized so
 that someone else can reproduce it.
 
-**Nothing was ported.** There is no rewritten driver, no reimplemented software, no Linux build
-of SimHub. The app is the **official, unmodified Wotever binary** running under Wine. What this
-repository contains is the result of **analysis, measurement and configuration**:
+**SimHub was not ported, not rewritten, and is not redistributed here.** There is no Linux
+build of SimHub, and the app is the **official Wotever binary** you download from their site.
+The bulk of this repository is **analysis, measurement and configuration**:
 
 - finding out how each device presents itself to the kernel and to Wine, and what Wine gets
   wrong by default;
 - `udev` rules that fix access;
 - the registry tweaks that make Wine hand the hardware to the app the way it expects;
-- an IL **patcher** for one specific case (the PDU5) — this repo ships the patcher, **never a
-  patched DLL**;
 - diagnostic tools (almost all read-only) so you can verify every stage;
 - documentation of what was **measured** — including the wrong turns.
 
-Nothing here redistributes third-party software. SimHub belongs to **Wotever**;
-`linux-simracing-utils` and Winecarte belong to
+That said, **"it modifies nothing" would be a lie**, and the difference matters enough to sit
+up here rather than in a footnote. What this project changes in *your* installation:
+
+| what | what it does | reversible? |
+|---|---|---|
+| `pdu5-leds-patch.py` | swaps **two opcodes** in the IL of your copy of `SimHub.Plugins.dll` | yes — `--revert`, with an automatic backup first |
+| `install bridge` | replaces SimHub's `libusb-1.0.dll` with [ours](https://github.com/juliscreudo/wine-libusb-bridge) | yes — the original becomes `libusb-1.0.dll.orig` |
+| `install pdu5-leds` | removes the prefix's NGen cache | yes — the images are **moved**, not deleted |
+| `install udev` / `install registry` | system udev rules and prefix registry keys | yes — `system.reg` is backed up |
+
+Two distinctions that hold up the claim above:
+
+- **This repo ships the patcher, never a patched DLL.** The modification happens on your
+  machine, to your copy, and disappears on SimHub's next update. No Wotever binary is
+  redistributed.
+- **The libusb bridge does not reimplement SimHub** — it reimplements the `libusb-1.0` ABI
+  (32 functions, all forwarded to Linux's `libusb`). That's a free library, and it is precisely
+  the piece missing under Wine. It lives in [its own repo](https://github.com/juliscreudo/wine-libusb-bridge)
+  because it serves any Windows app, not just SimHub.
+
+SimHub belongs to **Wotever**; `linux-simracing-utils` and Winecarte belong to
 **[srounce](https://github.com/srounce)**. Much of the credit for what works belongs to those
 projects — this repo just puts the pieces together.
 
@@ -49,10 +66,21 @@ Validated with the hardware connected on **CachyOS** (kernel 7.1, Wine 11.15), b
 | Pokornyi MCP IgnitionBox | `0483:cb42` | LEDs + buttons (HID) | ✅ **hardware-validated** |
 | Pokornyi PDU5 | `0483:cb01` | RPM LEDs (HID) + screen | ✅ **validated** — needs step 5 |
 | Pokornyi HYP-R | `0483:cb10` | LEDs (HID) + screen | ✅ **hardware-validated** |
+| Pokornyi FGT | `0483:cb15` | LEDs (HID) | ✅ **validated** — plugging it in and restarting SimHub was enough |
 | VoCore screen | `c872:1004` | dash + **touch** (libusb) | ✅ **validated** — 854×480, via the bridge |
 
+**The FGT is the evidence that the recipe generalizes.** It had never been connected to this
+bench: it was plugged in, SimHub was restarted, and it worked — **without a single line of
+device-specific configuration**. That isn't luck, and it can be explained before you plug the
+next one in: the udev rule matches `0483:cb??`, so the new PID already had an ACL;
+`EnableHidraw` is built from the installer's catalog, which already listed `cb15`; and
+`PokornyiFGTManager` asks for `usagePage 1 / usage 4` (measured in the IL), which is the
+collection Wine **actually** exposes. That is exactly the check in
+[item 4 of the walkthrough](#4-hid-check-your-managers-usagepage) — and failing it is why the
+PDU5 needs step 5.
+
 And what the recipes **should** cover, with nobody having tested it: the remaining Pokornyi
-devices (PDU7, LED Brows, GTB Pro, RALLY, LMPH, F499, FGT, HYP-R PRO, LMP PRO V2, GTE PRO V3),
+devices (PDU7, LED Brows, GTB Pro, RALLY, LMPH, F499, HYP-R PRO, LMP PRO V2, GTE PRO V3),
 Cube Controls (AMG, F-PRO, GT-PRO V2, AC190, Astra) and the other Conspit wheels (300GT,
 MAX 01, 310 APEX, 290 GP, PW1, CSD). SimHub's catalog holds **more than 200 devices**; the
 three paths below cover the vast majority.
@@ -589,10 +617,14 @@ the **manager's constants**, and what showed up in the log. That's what makes it
 say whether the recipe generalizes or whether that model has something of its own. Open an
 issue with those three.
 
-> ⚠️ **Scrub log output before pasting it into an issue.** `doctor` prints absolute paths
-> containing your username, and `install serial` shows your device's **USB serial number**.
-> Neither is needed for the diagnosis — replace them with `~/` and `<SERIAL>`. VID/PID and
-> model can stay: they're public vendor data, and they're the actual technical content.
+> ⚠️ **Strip the serial number before pasting log output into an issue.** `install serial`
+> shows the device's **USB serial**, and a serial is more than an identifier: several vendors
+> use it as proof of ownership for warranty claims. If someone files a claim with **yours**,
+> you're the one who can end up without coverage. Replace it with `<SERIAL>`.
+>
+> `doctor` also prints absolute paths containing your username — far less serious, but swap in
+> `~/` if you like. **VID/PID and model can stay**: they're public vendor data, and they're
+> exactly the technical content an issue needs.
 
 ---
 
@@ -700,3 +732,8 @@ up `system.reg` first); writing to firmware is not.
   because it serves any Windows app under Wine.
 - This repo is **analysis and configuration**.
 - Personal project, no warranty, no support.
+
+Licensed under **[GPL-3.0](LICENSE)**: use it, study it, modify it, fork it. Whoever distributes
+a modified version must keep the source open under the same license — nobody closes this into a
+proprietary product. ⚠️ The license covers **this repo**; SimHub remains Wotever's, under their
+own terms.

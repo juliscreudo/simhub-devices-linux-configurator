@@ -69,8 +69,13 @@ CATALOGO = {
     ("3514", "0601"): ("Conspit CSD",             "serial", "receita 2 + tela; VID/PID suspeito no catalogo"),
 }
 # validados com hardware; o resto e' "a regra cobre, mas ninguem testou"
-TESTADOS = {("0483","cb01"), ("0483","cb10"), ("0483","cb40"), ("0483","cb41"),
-            ("0483","cb42"), ("c872","1004")}
+# ⚠️ cb15 (FGT) entrou em 2026-08-19 SEM nenhum passo especifico: plugou, reabriu o
+#    SimHub, funcionou. E' a prova de que a receita generaliza — a regra udev casa
+#    cb??, o EnableHidraw sai deste CATALOGO, e o manager pede usagePage 1/4, que e'
+#    a collection que o Wine expoe. Ao acrescentar um device novo aqui, confira essas
+#    tres coisas antes de esperar o mesmo resultado.
+TESTADOS = {("0483","cb01"), ("0483","cb10"), ("0483","cb15"), ("0483","cb40"),
+            ("0483","cb41"), ("0483","cb42"), ("c872","1004")}
 
 
 def usb_presentes():

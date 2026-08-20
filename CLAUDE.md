@@ -604,7 +604,7 @@ revisão de firmware.
 | Pokornyi MCP IgnitionBox | `0483:cb42` | não | `PokornyiMCPIgnitionBoxManager` (HID) | ✅ **conecta, LEDs OK** |
 | Pokornyi PDU5 | `0483:cb01` | **sim** | composite: LEDs (HID) + tela | ✅ **LEDs e tela conectam** (patch + NGen removido) |
 | tela da PDU5 | `c872:1004` | — | `BitmapDisplayDevice` via libusb | ✅ **conecta e mostra o dash** (receita 3: ponte libusb) — MPRO D500FPC931A-A, 854×480 |
-| Pokornyi FGT | `0483:cb15` | não | `PokornyiFGTManager` (HID) | não testado — receita 1 |
+| Pokornyi FGT | `0483:cb15` | não | `PokornyiFGTManager` (HID) | ✅ **conecta** — plugar e reabrir bastou (2026-08-19) |
 | Cube Controls AMG | `c872:200c` | não | `CubeControlsAMGLedsManager` (HID) | não testado — receita 1 |
 | Pokornyi HYP-R | `0483:cb10` | **sim** | composite: LEDs (HID) + tela | ✅ **LEDs e tela conectam** (2026-08-18) |
 | Pokornyi F499 | `0483:cb14` | **sim** | composite: LEDs (HID) + tela | não testado |
@@ -627,8 +627,15 @@ Passos 1–3 **feitos e validados** em 2026-08-16 (os três MCP). O que sobra:
 2. ~~`lsusb` → confirmar VID/PID~~ ✅ — bateram todos.
 3. ~~Aplicar a receita 1 e verificar com `hidenum`~~ ✅ — **e o passo decisivo foi o udev**,
    não o registro (ver receita 1).
-4. **FGT e AMG**: mesma receita, marcas/managers diferentes — confirma que o caminho não é
-   específico da Pokornyi. A AMG é o teste mais informativo, por ser outro fabricante.
+4. ~~**FGT**~~ ✅ **2026-08-19 — e é o resultado mais informativo até agora.** O usuário
+   plugou o volante e reabriu o SimHub: funcionou, **sem nenhum passo específico**. Não foi
+   sorte, e o porquê é verificável antes de plugar o próximo: (a) a regra udev casa `cb??`,
+   então o PID novo já tinha ACL; (b) o `EnableHidraw` é montado a partir do `CATALOGO` do
+   instalador, que já listava `cb15`; (c) `PokornyiFGTManager` pede `usagePage 1 / usage 4`
+   (medido no IL), a collection que o Wine expõe. **Essas três checagens são o teste a
+   aplicar em qualquer device novo** — quando a (c) falha, o resultado é a PDU5.
+   ⚠️ Falta a **AMG**: continua sendo o teste mais informativo que resta, por ser outro
+   fabricante (VID `c872`, manager `CubeControlsAMGLedsManager`).
 5. Um volante com tela (HYP-R, F499, GTB Pro): **antes de plugar**, rode `ildump.py` no
    manager do modelo e veja o `usagePage`/`usage` que ele pede. Se for `1/4`, a metade dos
    LEDs deve conectar como nos MCP; se for `0xFF/1`, cai no mesmo muro da PDU5.

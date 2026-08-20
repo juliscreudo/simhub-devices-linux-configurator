@@ -16,21 +16,38 @@ e cada uma tem correção conhecida.
 Esta é **a solução que eu usei** para pôr meus periféricos para funcionar na aba Devices,
 organizada para que outra pessoa consiga reproduzir.
 
-**Nada foi portado.** Não há driver reescrito, nem software reimplementado, nem build Linux
-do SimHub. O app é o **binário oficial da Wotever, sem modificação**, rodando sob Wine. O que
-este repositório contém é resultado de **análise, medição e configuração**:
+**O SimHub não foi portado, nem reescrito, nem é redistribuído aqui.** Não existe build Linux
+do SimHub, e o app é o **binário oficial da Wotever**, que você baixa do site deles. O grosso
+deste repositório é **análise, medição e configuração**:
 
 - descobrir como cada device se apresenta ao kernel e ao Wine, e o que o Wine erra por padrão;
 - regras `udev` que corrigem o acesso;
 - as chaves de registro que fazem o Wine entregar o hardware do jeito que o app espera;
-- um **patcher** de IL para um caso específico (a PDU5) — o repo distribui o patcher, **nunca
-  a DLL corrigida**;
 - ferramentas de diagnóstico (quase todas somente leitura) para conferir cada etapa;
 - documentação do que foi **medido** — incluindo os caminhos errados.
 
-Nada aqui redistribui software de terceiros. O SimHub é da **Wotever**; o
-`linux-simracing-utils` e o Winecarte são da **[srounce](https://github.com/srounce)**. Boa
-parte do crédito pelo que funciona é desses projetos — este repo só junta as peças.
+Dito isso, **"não modifica nada" seria mentira**, e a diferença importa o bastante para estar
+aqui em cima e não numa nota de rodapé. O que este projeto altera na *sua* instalação:
+
+| o que | o que faz | reversível? |
+|---|---|---|
+| `pdu5-leds-patch.py` | troca **dois opcodes** no IL da sua cópia de `SimHub.Plugins.dll` | sim — `--revert`, com backup automático antes |
+| `install bridge` | substitui a `libusb-1.0.dll` do SimHub pela [nossa](https://github.com/juliscreudo/wine-libusb-bridge) | sim — a original vira `libusb-1.0.dll.orig` |
+| `install pdu5-leds` | remove o cache NGen do prefixo | sim — as imagens são **movidas**, não apagadas |
+| `install udev` / `install registry` | regras udev do sistema e chaves do prefixo | sim — `system.reg` tem backup |
+
+Duas distinções que sustentam a frase lá de cima:
+
+- **O repo distribui o patcher, nunca a DLL corrigida.** A modificação acontece na sua máquina,
+  na sua cópia, e some no próximo update do SimHub. Nenhum binário da Wotever é redistribuído.
+- **A ponte libusb não reimplementa o SimHub** — ela reimplementa a ABI da `libusb-1.0`
+  (32 funções, todas repassadas para a `libusb` do Linux). É biblioteca livre, e é justamente
+  a peça que falta sob Wine. Vive em [repo próprio](https://github.com/juliscreudo/wine-libusb-bridge)
+  porque serve qualquer app Windows, não só o SimHub.
+
+O SimHub é da **Wotever**; o `linux-simracing-utils` e o Winecarte são da
+**[srounce](https://github.com/srounce)**. Boa parte do crédito pelo que funciona é desses
+projetos — este repo só junta as peças.
 
 Projeto pessoal, sem garantia nem suporte.
 
@@ -47,10 +64,20 @@ Validado com o hardware conectado em **CachyOS** (kernel 7.1, Wine 11.15), entre
 | Pokornyi MCP IgnitionBox | `0483:cb42` | LEDs + botões (HID) | ✅ **validado com hardware** |
 | Pokornyi PDU5 | `0483:cb01` | LEDs RPM (HID) + tela | ✅ **validado** — precisa do passo 5 |
 | Pokornyi HYP-R | `0483:cb10` | LEDs (HID) + tela | ✅ **validado com hardware** |
+| Pokornyi FGT | `0483:cb15` | LEDs (HID) | ✅ **validado** — plugar e reabrir o SimHub bastou |
 | Tela VoCore | `c872:1004` | dash + **toque** (libusb) | ✅ **validado** — 854×480, via a ponte |
 
+**O FGT é a evidência de que a receita generaliza.** Ele nunca tinha sido ligado nesta bancada:
+foi plugado, o SimHub reiniciado, e funcionou — **sem uma linha de configuração específica para
+ele**. Isso não é sorte, e dá para explicar antes de plugar o próximo: a regra udev casa
+`0483:cb??`, então o PID novo já tinha ACL; o `EnableHidraw` é montado a partir do catálogo do
+instalador, que já listava `cb15`; e o `PokornyiFGTManager` pede `usagePage 1 / usage 4`
+(medido no IL), que é a collection que o Wine **de fato** expõe. É exatamente a checagem do
+[item 4 do roteiro](#4-hid-confira-o-usagepage-do-seu-manager) — e é por não bater nela que a
+PDU5 precisa do passo 5.
+
 E o que a receita **deveria** cobrir, sem ninguém ter testado: os demais Pokornyi (PDU7, LED
-Brows, GTB Pro, RALLY, LMPH, F499, FGT, HYP-R PRO, LMP PRO V2, GTE PRO V3), a Cube Controls
+Brows, GTB Pro, RALLY, LMPH, F499, HYP-R PRO, LMP PRO V2, GTE PRO V3), a Cube Controls
 (AMG, F-PRO, GT-PRO V2, AC190, Astra) e os demais volantes Conspit (300GT, MAX 01, 310 APEX,
 290 GP, PW1, CSD). São **mais de 200 devices** no catálogo do SimHub; os três caminhos abaixo
 cobrem a grande maioria.
@@ -573,10 +600,14 @@ saída do `hidenum`**, as **constantes do manager** e o que apareceu no log. É 
 para dizer se a receita generaliza ou se aquele modelo tem algo próprio. Abra uma issue com
 esses três.
 
-> ⚠️ **Antes de colar saída de log numa issue, limpe.** O `doctor` imprime caminhos absolutos
-> com o seu nome de usuário, e o `install serial` mostra o **número de série USB** do seu
-> device. Nenhum dos dois é necessário para o diagnóstico — troque por `~/` e `<SERIAL>`.
-> VID/PID e modelo podem ficar: são públicos do fabricante, e são justamente o dado técnico.
+> ⚠️ **Apague o número de série antes de colar saída de log numa issue.** O `install serial`
+> mostra o **serial USB** do device, e serial não é só identificador: vários fabricantes o usam
+> como prova de titularidade para acionar garantia. Se alguém abrir um chamado com o **seu**,
+> quem pode ficar sem cobertura é você. Troque por `<SERIAL>`.
+>
+> O `doctor` também imprime caminhos absolutos com o seu nome de usuário — bem menos grave, mas
+> troque por `~/` se quiser. **VID/PID e modelo podem ficar**: são públicos do fabricante e são
+> justamente o dado técnico que interessa na issue.
 
 ---
 
@@ -682,3 +713,8 @@ instalador faz backup de `system.reg` antes); escrever na firmware não é.
   porque serve qualquer app Windows sob Wine.
 - Este repo é **análise e configuração**.
 - Projeto pessoal, sem garantia nem suporte.
+
+Licenciado sob **[GPL-3.0](LICENSE)**: use, estude, modifique, forke. Quem distribuir uma versão
+modificada tem de manter o fonte aberto sob a mesma licença — ninguém fecha isto num produto
+proprietário. ⚠️ A licença cobre **este repo**; o SimHub continua sendo da Wotever, sob os
+termos dela.
